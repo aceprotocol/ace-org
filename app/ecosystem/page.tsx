@@ -11,7 +11,6 @@ export const metadata = pageMetadata({
 
 const PRODUCTS = [
   { name: 'SoulPass', url: 'https://soulpass.ai', line: 'The first wallet built on ACE: an ACE identity and private messaging, with every payment approved by its owner in the app (approval and execution are app features, not part of the protocol).' },
-  { name: 'TigerPass', url: 'https://tigerpass.net', line: 'An agent wallet whose agents use ACE for encrypted agent-to-agent messaging.' },
 ];
 
 export default function EcosystemPage() {
