@@ -1,0 +1,1720 @@
+# ACE specification: chapters 00–08, commerce profile, reference and SDKs
+
+Part of the ACE agent entrypoints: https://aceprotocol.org/llms.txt. Pre-release: the protocol may change until its first release.
+
+
+---
+
+Source: https://aceprotocol.org/docs/overview
+
+# 00 — Overview and conformance
+
+ACE (Agent Commerce Engine) is an open protocol for agent **identity**, **private communication** and a shared **vocabulary for economic interaction**. Every signature is ML-DSA and every packet is encrypted with the hybrid post-quantum KEM X-Wing.
+
+ACE lets an agent state what it wants reliably, learn which interaction rules a peer supports, and exchange information securely. Choosing a counterparty, negotiating terms, deciding whether to trade and executing anything are decisions for agents and applications. ACE grants no execution, payment or shell authority.
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119.
+
+## Layers
+
+| Layer | Contents | Requirement |
+|---|---|---|
+| Core | KEL identity ([01](/docs/identity)), encodings and signatures ([02](/docs/encoding)), packets ([03](/docs/packet)), descriptors with their optional Delegation and ERC-8004 members ([04](/docs/descriptor)), admission ([05](/docs/admission)), delivery and receipts ([06](/docs/delivery)), the relay HTTP binding ([07](/docs/relay)), profile manifests ([08](/docs/profiles)) | MUST implement |
+| Official profiles | `ace:text:1`, `ace:commerce:1` ([profiles/commerce.md](/docs/commerce)) | Installed when needed; same mechanism as third-party profiles |
+| Applications | Execution authorization, budgets, wallet approval flows, payment execution | Outside ACE |
+
+A **profile** is a versioned set of message types with immutable schema digests. The core profile `ace:core:1` (receipts and contact requests) is always installed. Other profiles are installed by local configuration only; receiving a message, descriptor or manifest never installs anything.
+
+## Objects at a glance
+
+- A **KEL** (key event log) names an identity `ace:sha256:<hex>` and delegates its operational signing key.
+- A **PublishedAgent** `{kel, descriptor}` announces relays, a current X-Wing prekey, enabled profiles and display metadata. It is signed and lives at most 24 hours.
+- A **packet** is the only object exchanged between agents. It is encrypted to the recipient's prekey and signed by the sender. Its plaintext is private content `{type, schemaDigest, threadId?, body}`.
+- A **delivery permit** is signed by a receiver and lets one sender deliver to it and resolve its private descriptor.
+- A **receipt** (`ace:receipt:1`) reports the receiver's outcome for one message. Contact requests (`ace:contact:1`) bootstrap admission.
+
+## Conformance
+
+A conforming endpoint implements every core chapter, including the receive pipeline in [06](/docs/delivery#receive-pipeline) in its stated order, and reproduces the shared vectors. A conforming relay implements [07](/docs/relay). Implementations MUST reject anything this specification does not define where an object is described as closed; they MUST NOT add fallbacks to other formats.
+
+File layouts, language APIs and storage formats are not protocol requirements unless a chapter states otherwise. Lines marked **SDK note** are informative.
+
+## Trust boundaries
+
+| Party | Sees | Trusted for |
+|---|---|---|
+| Endpoint (agent runtime holding keys) | Keys and plaintext | Everything it signs and decides |
+| Relay | Registered KELs, published descriptors, permits presented to it, blocks, packet metadata, IP addresses and timing ([06](/docs/delivery#security-considerations)) | Availability only. It cannot read private content or forge signatures; clients verify everything they receive from it |
+| Hosted MCP service | Keys and plaintext of the identities it hosts | It is a custodial endpoint. Hosted identities carry the `hosted` card tag ([04](/docs/descriptor#card)) |
+
+Relays are replaceable: any operator can run the binding in [07](/docs/relay), and an agent chooses its relays in its descriptor. No relay, chain, wallet or central registry is required to join, discover or communicate.
+
+Security properties and limits are stated once, in [06](/docs/delivery#security-considerations).
+
+
+---
+
+Source: https://aceprotocol.org/docs/identity
+
+# 01 — Identity
+
+An ACE identity is defined by a **key event log** (KEL): an ordered list of signed events whose first event, the inception, names the identity. The KEL governs control and signing only. Packet encryption keys (prekeys) live in the descriptor ([04](/docs/descriptor#prekey)).
+
+An identity holds:
+
+1. A **root key** (`ml-dsa-65`) that signs only KEL events.
+2. A **committed next root**: the SHA-256 digest of the key that will replace the root. Control is anchored in this commitment, not in a signature algorithm.
+3. A **signing key** (`ml-dsa-65`, 1952-byte public key) delegated by the root and used for every signature outside the KEL.
+
+## ACE ID
+
+```
+aceId = "ace:sha256:" || lowercaseHex(SHA-256(icpBytes))
+```
+
+`icpBytes` are the canonical bytes of the inception event. The ID never changes: rotation and re-delegation append events.
+
+## Key event log
+
+Every event carries `t`, `seq` (0, then +1 per event), `ts` (wire integer, non-decreasing, `ts <= now + TIMESTAMP_WINDOW_SECONDS`) and, after the inception, `prev` (64 lowercase hex: SHA-256 of the previous event's canonical bytes). Objects are closed. `next` is 64 lowercase hex; `publicKey` members are canonical Base64 ([02](/docs/encoding#base64)).
+
+| `t` | Members | Signed by | Effect |
+|---|---|---|---|
+| `icp` | `root{scheme,publicKey}`, `next`, `sig` | the root | creates the identity; commits the next root |
+| `rot` | `prev`, `root{scheme,publicKey}`, `next`, `sig` | the new root alone | `SHA-256(UTF-8(scheme) ‖ 0x00 ‖ publicKey)` of the new root MUST equal the committed `next`; replaces the root; revokes the signing delegation |
+| `dlg` | `prev`, `key{scheme,publicKey}`, `notAfter`?, `sig` | the current root | delegates the signing key, replacing any previous one |
+
+Canonical bytes ([`encodePayload`, `decimal`](/docs/encoding#signatures)):
+
+```
+icp: encodePayload("icp", decimal(seq), decimal(ts), root.scheme, rootPublicKeyBytes, nextDigestBytes)
+rot: encodePayload("rot", decimal(seq), decimal(ts), prev, root.scheme, rootPublicKeyBytes, nextDigestBytes)
+dlg: encodePayload("dlg", decimal(seq), decimal(ts), prev, key.scheme, keyPublicKeyBytes, notAfterOrEmpty)
+```
+
+`prev` is the 64-character hex string; key and digest fields are decoded bytes; `notAfterOrEmpty` is `decimal(notAfter)` or the empty string.
+
+`sig` is `{scheme, value}` (no `seq`), REQUIRED on every event and never part of the canonical bytes. It is an ML-DSA signature with action `kel` over `M` with `aceId`, `timestamp = ts`, an empty `seqOrEmpty` and payload `eventBytes` ([02](/docs/encoding#signatures)); for `icp` the ACE ID is computed from `eventBytes` first. `sig.scheme` MUST equal the scheme of the signing root.
+
+### Verifier rules
+
+A verifier replays the log from `seq` 0 in this order. Structural failures are `invalid_kel`; a well-formed signature that does not verify is `invalid_signature`.
+
+1. **Structure, before any signature:** at most `MAX_KEL_EVENTS` events; `icp` only at `seq` 0; closed members and field shapes; contiguous `seq`; non-decreasing `ts` with `ts <= now + TIMESTAMP_WINDOW_SECONDS`; `prev` equals the hash of the previous event.
+2. **`icp`:** the root is `ml-dsa-65` with a 1952-byte key; then `sig` verifies under it.
+3. **`rot`:** the new root is a valid `ml-dsa-65` key; its commitment MUST match the previous `next` (checked before any signature); `sig.scheme` equals the new root's scheme; `sig` verifies under the new root, and the old root takes no part. Whoever holds only the current root cannot rotate. After a `rot` no signing key is delegated until a new `dlg`.
+4. **`dlg`:** `sig` verifies under the current root, then: `key.scheme` is `ml-dsa-65` with a 1952-byte key; `notAfter`, when present, satisfies `ts < notAfter <= ts + MAX_SIGNING_KEY_LIFETIME`. Without `notAfter` the key lives until replaced.
+5. **Usable.** An identity is usable at time `t` when a signing key is delegated and, if `notAfter` is set, `t < notAfter`. A relay MUST NOT register an unusable identity and a peer MUST NOT send to one.
+6. **Forks.** At the first `seq` where a candidate log and the pinned log differ (the fork point), the candidate supersedes the pinned events from that point only when the candidate's event there is a `rot` and none of the pinned events at or after it is a `rot` (recovery by the holder of the committed next root). Otherwise the pinned log is kept and the candidate is `kel_conflict`. A candidate naming a different ACE ID is `kel_conflict`.
+7. An endpoint never prunes a pinned log.
+
+### Operational signatures
+
+Every signature outside the KEL is made by the delegated signing key, carries the `seq` of the `dlg` that delegated it, and signs `M` with `seqOrEmpty = decimal(seq)` ([02](/docs/encoding#delegated-signatures)). A verifier, using the signer's pinned or freshly verified KEL:
+
+1. requires `signature.scheme` to be `ml-dsa-65`;
+2. requires `signature.seq` to equal the `seq` of the current signing delegation (`stale_peer_binding` otherwise; [06](/docs/delivery#receive-pipeline) defines when a receiver refreshes first), and never uses `seq` to select a key outside that log;
+3. requires **signed while live**: the object's signed timestamp is before the delegation's `notAfter`, if any (`stale_peer_binding`);
+4. then verifies the signature (the surface's signature code);
+5. requires the signer's KEL, after reconciliation with the pin, to be usable at `now` (`stale_peer_binding`).
+
+Before signing, a signer checks its own identity at `t = max(now, ts of the last event)`: the log verifies, the identity is usable, and the key and `seq` are the current delegation. Any failure is the local error `identity_unavailable` and nothing is signed.
+
+## Pinning
+
+An endpoint pins, per peer ACE ID, the verified KEL (its `seq`, last hash and state) and the newest verified descriptor. Under one exclusive lock, a candidate KEL:
+
+- is pinned when there is no pin (`adopted`);
+- replaces the pin when it extends it (`extended`) or supersedes it under rule 6 (`recovered`);
+- only refreshes `fetchedAt` when it is a prefix of or equal to the pin (`unchanged`);
+- is otherwise `kel_conflict` and changes nothing.
+
+A candidate descriptor whose `kel` advances the pinned log replaces the pinned one regardless of `issuedAt`; under the same log it replaces it only when its `issuedAt` is newer, or equal with identical canonical claims, and an older one is ignored ([04](/docs/descriptor#caching)). Every signed document of a pinned identity (descriptor, permit, delegation credential, contact `source`) is verified under the state that results from reconciling the KEL it carries with the pin, including the issuer of a delegation entry embedded in another identity's descriptor ([04](/docs/descriptor#delegations)): carrying a prefix of the pinned log never reinstates a superseded delegation (`stale_peer_binding`), and a fork is `kel_conflict`. Cache expiry triggers a refresh and never removes a pin. A stored pin is re-verified on load; corrupt state is `storage_failed`. When to pin and refresh is defined by admission ([05](/docs/admission)) and the receive pipeline ([06](/docs/delivery#receive-pipeline)).
+
+## Rotation and recovery
+
+- **Signing key compromise:** a new root-signed `dlg` replaces the key; signatures with the superseded `seq` stop verifying. `notAfter` bounds a software key's life.
+- **Root compromise:** the thief cannot rotate. The holder of the next root appends a `rot` that forks the log at the start of the current root epoch (after its last `icp` or `rot`), revoking every delegation of that epoch, followed by a fresh `dlg`. Peers adopt it as `extended` or `recovered` (rule 6).
+- **Device loss with the next root kept elsewhere:** recover the same way from a copy of the log (for example from a relay).
+- Implementations MUST NOT commit as the next root any root the log has already revealed. A verifier cannot detect this, so it is a signer-side refusal.
+- Losing the root and the next root together, or the next root stored on a lost device, is loss of the identity.
+- **Next-root compromise** is loss of the identity: the thief can rotate, revoke every delegation and commit a next root of its own, and nothing recovers from that. The next root MUST be stored at least as strongly as the root, and apart from it.
+
+Residual risk: a peer whose pin predates the reveal of a stolen root can be re-forked out of band until it refreshes from a relay holding the full log. This is inherent to single-signature pre-rotation without witnesses. A relay that has deleted an unregistered identity's KEL keeps only its fixed-size horizon ([07](/docs/relay#registration)): it refuses older logs, forks before the last root epoch and `dlg`-only forks, but accepts any candidate holding a `rot` after the epoch start without locating the fork point (only the holder of the committed next root can sign one), cannot tell a shorter fork from a strict prefix (both are refused), and keeps the horizon itself indefinitely, charged to the registering network's byte budget.
+
+
+---
+
+Source: https://aceprotocol.org/docs/encoding
+
+# 02 — Encoding, signatures and constants
+
+These rules apply wherever another chapter refers to them. A string limit in "characters" counts Unicode code points.
+
+## Scalars
+
+### Wire integers
+
+Timestamps, `seq`, `revision`, `limit`, lifetimes and every other protocol integer are wire integers: a JSON number whose mathematical value is an integer in `[0, 2^53-1]`. The lexical form does not matter (`1000`, `1000.0` and `1e3` are equal). Booleans, strings, `null` and non-finite values are rejected.
+
+`decimal(n)` is the base-10 ASCII form of a wire integer with no sign and no leading zeros (`"0"` for zero).
+
+**Current time** is Unix seconds. An implementation validates its clock value as a wire integer before any comparison (`invalid_argument` otherwise), so no check fails open.
+
+### Base64
+
+Only padded standard Base64 (RFC 4648 §4) is accepted: no whitespace, no URL-safe alphabet, no missing padding. Decoders MUST reject non-canonical input: re-encoding the decoded bytes MUST reproduce the input exactly (`"QR=="` is rejected, `"QQ=="` accepted). Every size limit on a Base64 field is a limit on the **decoded** bytes.
+
+### Identifiers
+
+| Name | Grammar |
+|---|---|
+| ACE ID | `^ace:sha256:[0-9a-f]{64}$` |
+| Message ID | lowercase UUID v4: `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| Hex digest | `^[0-9a-f]{64}$` (prekey ID, `schemaDigest`, profile `digest`, `prev`, `next`) |
+| Namespaced identifier (profile ID, message type) | ASCII, at most `MAX_TYPE_BYTES` bytes, `^[a-z][a-z0-9+.-]*:[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$`. Opaque: parsing MUST NOT fetch a URI or execute code. The prefix `ace:` is reserved for this specification |
+| Thread ID | 1..`MAX_THREAD_ID_LENGTH` code points, none in U+0000–U+001F or U+007F |
+| Handle | `^[a-z][a-z0-9_-]{2,31}$` |
+| Stream ID | `^[0-9]{1,20}-[0-9]{1,20}$` (`<ms>-<seq>`), compared as the integer pair |
+| Error or outcome code | `^[a-z0-9_]{1,64}$` |
+
+### HTTPS URLs
+
+A card `image` and other HTTPS references MUST match the ACE HTTPS URL grammar exactly; implementations MUST NOT substitute a platform URL parser for acceptance:
+
+```
+^https://[A-Za-z0-9](https://github.com/aceprotocol/ace-spec/blob/main/?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](https://github.com/aceprotocol/ace-spec/blob/main/?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*(?::[0-9]{1,5})?(?:[/?#][A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*)?$
+```
+
+with total length at most 2048 characters, host at most 253 characters and port, if present, in 1..65535.
+
+### Relay URLs
+
+A relay base URL is normalized as follows; a URL failing steps 1–3 is `invalid_argument`:
+
+1. The scheme is `http` or `https`, case-insensitive, written lowercase.
+2. No `?`, `#`, userinfo (`@` in the authority), or character at or below U+0020 or equal to U+007F. Nothing is trimmed.
+3. The host is a non-empty run of ASCII letters, digits, `.` and `-`, written lowercase, or a bracketed IPv6 literal with lowercase hex digits. A port, if present, is 1–5 digits without a leading zero, in 1..65535; `:443` for `https` and `:80` for `http` are removed.
+4. All trailing `/` of the path are removed; the path is otherwise kept.
+
+A **canonical relay URL** is an `https` URL of at most 2048 characters that equals its own normalization and whose host matches the ACE HTTPS URL grammar's host. A development configuration MAY explicitly allow `http` with a loopback host (`localhost`, `127.0.0.1`, `[::1]`); production verifiers MUST reject it.
+
+## JSON
+
+### JSON values
+
+Received JSON is accepted only if it is valid UTF-8 (invalid sequences are rejected, not replaced), parses under RFC 8259, contains no non-finite number (including literals such as `1e400` that overflow), and respects the depth bound below. Senders apply the same rules before serializing. Duplicate object keys MUST be rejected where the parser can detect them; canonical JSON never contains them.
+
+**Depth.** The top-level value is at depth 0; a member or element of a value at depth d is at depth d + 1. A value is *within depth n* when no object or array in it is at a depth greater than n. Each protocol object — a packet, private content, a PublishedAgent, a permit, a registration request — MUST be within `MAX_JSON_DEPTH`, measured from its own top-level value; its parts (a descriptor's `ext`, a content `body`) are bounded through it. A closed object that only carries protocol objects (an invitation, a `{packet, permit}` request body, a relay response) is bounded through them. A relay refuses an input protocol object deeper than this with that object's validation error. A client parses a relay response or SSE `data` as a whole within `MAX_JSON_DEPTH + 3` (the deepest wrapper: an inbox page holds its packets at depth 3), then checks each contained packet and PublishedAgent within `MAX_JSON_DEPTH`; either failure is `relay_protocol_error` for that whole response.
+
+### Canonical JSON
+
+`canonicalStateBytes(value)` is the single canonical serialization used for hashing, signing and size limits. It is UTF-8 with no whitespace:
+
+- `null`, `true`, `false` as literals.
+- A number as the ECMAScript `Number::toString` of its IEEE 754 binary64 value (RFC 8785 §3.2.2.3); `-0` is `0`. Every protocol integer is therefore `decimal(n)`.
+- A string as `"`, its characters, `"`, escaping exactly: `"` → `\"`, `\` → `\\`, U+0008 → `\b`, U+0009 → `\t`, U+000A → `\n`, U+000C → `\f`, U+000D → `\r`, and every other code point below U+0020 as `\u00xx` with lowercase hex. Everything else, including `/`, U+007F and non-ASCII, is emitted as raw UTF-8. A string containing an unpaired surrogate is rejected.
+- An array as `[`, its elements in order separated by `,`, `]`.
+- An object as `{`, its members `"key":value` separated by `,`, `}`, with members sorted by key in ascending **Unicode code point order**: keys are compared as sequences of code points, the first differing code point decides, and a proper prefix sorts first. This equals byte order of the UTF-8 encodings. (It differs from RFC 8785, which orders by UTF-16 code units, only for keys mixing supplementary-plane characters with U+E000–U+FFFF.)
+
+The **claims** of a signed object are the complete object without its outer `signature` member. Nested signatures are part of the claims.
+
+## Signatures
+
+```
+encodePayload(f1, …, fn) = len(f1)[4, big-endian] ‖ f1 ‖ … ‖ len(fn)[4, big-endian] ‖ fn
+
+M   = encodePayload("ace.v1", aceId, decimal(timestamp), seqOrEmpty, payload)
+sig = ML-DSA.Sign(sk, M, ctx = UTF-8(action))
+```
+
+String fields are UTF-8; byte fields are used as is; `encodePayload()` is the empty byte string. `seqOrEmpty` is the empty string for a KEL event signature and `decimal(seq)` of the signing delegation for every other signature. `aceId`, `timestamp` and `payload` per action are listed in [§ Signing actions](#signing-actions).
+
+Signing is FIPS 204 ML-DSA, hedged, with no pre-hash; verification is `ML-DSA.Verify(pk, M, ctx, sig)`. The action is the ML-DSA context string, so a signature made under one action never verifies under another. Objects whose claims have the same shape (a delivery permit and a delegation credential) are distinguished only by the ML-DSA context; an implementation that ignores the context would make them interchangeable. A verifier rejects a signature of any length other than the scheme's and MUST NOT accept HashML-DSA. Verifiers never compare signature bytes.
+
+| Scheme | Algorithm | Use | Public key | Private key | Signature |
+|---|---|---|---|---|---|
+| `ml-dsa-65` | ML-DSA-65 (FIPS 204, NIST category 3) | root, signing key | 1952 bytes | 32-byte seed (FIPS 204 § 3.6.3) | 3309 bytes |
+
+`ml-dsa-65` is the only scheme. Key and signature objects carry `scheme`, so a later revision can add a scheme that an identity adopts by committing a next root of that scheme at a rotation ([01](/docs/identity#rotation-and-recovery)).
+
+### Delegated signatures
+
+Every signature except a KEL event signature is made by the delegated signing key with `seqOrEmpty = decimal(seq)`, where `seq` is the `seq` of the signing delegation. Its signature object is the closed `{scheme, seq, value}`: `scheme` is `ml-dsa-65`, `seq` a wire integer, `value` canonical Base64 of 3309 bytes (4412 characters). Verification follows [01](/docs/identity#operational-signatures). KEL event signatures are `{scheme, value}` with `seqOrEmpty` empty ([01](/docs/identity#key-event-log)).
+
+### Signing actions
+
+The complete list. `aceId` and `timestamp` are the inputs of `M`.
+
+| Action | Object | `aceId`, `timestamp` | Payload | Defined in |
+|---|---|---|---|---|
+| `kel` | KEL event (`seqOrEmpty` empty) | the identity, event `ts` | `eventBytes` | [01](/docs/identity#key-event-log) |
+| `packet` | Packet | `from`, `timestamp` | `encodePayload(to, messageId, prekeyId, kemCiphertextBytes, payloadBytes)` | [03](/docs/packet#signature) |
+| `agent-descriptor` | Descriptor | `aceId`, `issuedAt` | `canonicalStateBytes(claims)` | [04](/docs/descriptor) |
+| `delegation` | Delegation credential | `issuer`, `issuedAt` | `canonicalStateBytes(claims)` | [04](/docs/descriptor#delegations) |
+| `delivery-permit` | Delivery permit | `issuer`, `issuedAt` | `canonicalStateBytes(claims)` | [05](/docs/admission#delivery-permits) |
+| `register-request` | `POST /v1/register` body | `aceId`, `timestamp` | `encodePayload(lastHashHex, audience)` | [07](/docs/relay#registration) |
+| `listen` | `GET /v1/listen` | auth headers | `encodePayload(sinceOrDash)` | [07](/docs/relay#authentication) |
+| `inbox` | `GET /v1/inbox` | auth headers | `encodePayload(sinceOrDash, decimal(limit))` | [07](/docs/relay#inbox) |
+| `inbox-ack` | `POST /v1/inbox/ack` | auth headers | `encodePayload(through)` | [07](/docs/relay#inbox) |
+| `block` | `POST /v1/blocks` | auth headers | `encodePayload(peer, blocked ? "block" : "unblock", decimal(revision))` | [07](/docs/relay#blocks) |
+| `unregister` | `POST /v1/unregister` | auth headers | empty | [07](/docs/relay#registration) |
+
+Header-authenticated actions sign `encodePayload(audience, nonce, actionPayload)`, where `actionPayload` is the payload above ([07](/docs/relay#authentication)); they are never signed directly.
+
+## Constants
+
+Normative values used by every implementation and relay.
+
+| Name | Value | Meaning |
+|---|---|---|
+| `TIMESTAMP_WINDOW_SECONDS` | 300 | Future bound for every signed timestamp; freshness window for relay requests |
+| `OFFLINE_WINDOW_SECONDS` | 604800 | Past bound for packets; relay queue retention; Outbox retry horizon; lifetime of an outgoing `pending` entry; prekey retention; minimum relay retention of an unregistered identity's KEL |
+| `MAX_PLAINTEXT_BYTES` | 1179648 | Canonical private content (1 MiB + 128 KiB) |
+| `MAX_PACKET_BYTES` | 2097152 | Canonical JSON of a packet |
+| `MAX_SEND_BODY_BYTES` | 2162688 | Body of `POST /v1/send` (`MAX_PACKET_BYTES + 65536`) |
+| `MAX_PUBLISHED_AGENT_BYTES` | 1048576 | Canonical JSON of a PublishedAgent; also bounds a registration request |
+| `MAX_JSON_DEPTH` | 32 | Depth of each protocol object ([§ JSON values](#json-values)) |
+| `MAX_TYPE_BYTES` | 256 | Namespaced identifier |
+| `MAX_THREAD_ID_LENGTH` | 256 | Thread ID code points |
+| `MAX_KEL_EVENTS` | 256 | Events per KEL |
+| `MAX_SIGNING_KEY_LIFETIME` | 31622400 | `notAfter - ts` of a `dlg` signing key |
+| `MAX_DESCRIPTOR_LIFETIME` | 86400 | `expiresAt - issuedAt` of a descriptor |
+| `MAX_DELEGATION_LIFETIME` | 604800 | `expiresAt - issuedAt` of a delegation credential |
+| `MAX_PERMIT_LIFETIME` | 2592000 | `expiresAt - issuedAt` of a delivery permit |
+| `PERMIT_RENEWAL_SECONDS` | 1296000 | Remaining permit lifetime below which a receipt carries a renewal |
+| `MAX_RETAINED_PREKEYS` | 16 | Superseded prekey seeds an endpoint retains |
+| `MAX_EXT_BYTES` | 4096 | Canonical JSON of a descriptor `ext` |
+| `MAX_NOTE_BYTES` | 512 | UTF-8 bytes of a contact `note` |
+| `MAX_INBOX_PAGE` | 100 | Maximum `limit` of inbox and directory pages; default inbox `limit` |
+| `DEFAULT_PAGE_LIMIT` | 20 | Default `limit` of directory pages |
+| `MAX_PAGE_BYTES` | 8388608 | Serialized inbox or directory page |
+| `MAX_MANIFEST_BYTES` | 65536 | Canonical JSON of a profile manifest |
+| `MAX_PENDING_CONTACT_REQUESTS` | 16 | Held incoming contact requests ([05](/docs/admission#flow)) |
+| `CONTACT_REQUEST_TTL_SECONDS` | 86400 | Lifetime of a held incoming contact request and of a relay's stranger entries |
+| `MAX_STRANGER_KEL_EVENTS` | 32 | Events per KEL in a stranger's contact `source` (its own and each delegation's) |
+| `MAX_STRANGER_DELEGATIONS` | 1 | Delegation entries in a stranger's contact `source` |
+| `STRANGER_ALLOWANCE` | 16 | Queued stranger entries per recipient at a relay ([07](/docs/relay#send)) |
+| `STRANGER_NETWORK_ALLOWANCE` | 2 | Queued stranger entries per client network per recipient at a relay |
+| `CLIENT_NETWORK_PREFIX_IPV4` | 24 | Prefix length of an IPv4 client network ([07](/docs/relay#client-networks)) |
+| `CLIENT_NETWORK_PREFIX_IPV6` | 56 | Prefix length of an IPv6 client network |
+| `MIN_BLOCK_CAP` | 256 | Least number of tracked block peers per identity a relay may cap at |
+| `PIN_REFRESH_INTERVAL_SECONDS` | 30 | Minimum interval between pin refreshes of one sender in the receive pipeline |
+| `MAX_FETCH_ATTEMPTS` | 3 | Fetches of one inbox entry without a final disposition before it is quarantined |
+
+
+---
+
+Source: https://aceprotocol.org/docs/packet
+
+# 03 — Packet
+
+The packet is the only object agents exchange. It is encrypted to the recipient's current prekey ([04](/docs/descriptor#prekey)) and signed by the sender's delegated signing key.
+
+```json
+{
+  "ace": "1",
+  "messageId": "550e8400-e29b-41d4-a716-446655440000",
+  "from": "ace:sha256:…",
+  "to": "ace:sha256:…",
+  "timestamp": 1760140800,
+  "encryption": { "prekey": "<64 hex>", "kemCiphertext": "<Base64, 1120 bytes>", "payload": "<Base64>" },
+  "signature": { "scheme": "ml-dsa-65", "seq": 1, "value": "<Base64, 3309 bytes>" }
+}
+```
+
+## Decoding
+
+A packet is accepted only if all of the following hold. `ace` is checked first; every other failure is `invalid_packet`.
+
+| Field | Rule |
+|---|---|
+| (packet) | A JSON object whose canonical JSON is at most `MAX_PACKET_BYTES`. A transport rejects a larger serialized packet before parsing |
+| `ace` | A string; any value other than `"1"` is `unsupported_version` |
+| `messageId` | Message ID ([02](/docs/encoding#identifiers)); chosen by the sender, unique per sender, and kept across retries |
+| `from`, `to` | ACE IDs; `from != to` |
+| `timestamp` | Wire integer: the time of this signing attempt |
+| `encryption.prekey` | Hex digest: the recipient's prekey ID |
+| `encryption.kemCiphertext` | Canonical Base64 of exactly 1120 bytes |
+| `encryption.payload` | Canonical Base64; decoded length in `[28, MAX_PLAINTEXT_BYTES + 28]` |
+| `signature` | Delegated signature object ([02](/docs/encoding#delegated-signatures)) |
+
+All three objects are closed: an unknown member at any level is `invalid_packet`.
+
+There is no conversation identifier on the wire. An endpoint that needs a local pair key uses `lowercaseHex(SHA-256(min(a, b) ‖ 0x00 ‖ max(a, b)))`, where `a` and `b` are the UTF-8 bytes of the two ACE IDs, ordered bytewise.
+
+## Encryption
+
+```
+header  = encodePayload("ace.v1.packet", from, to, messageId, decimal(timestamp), prekeyId, kemCiphertextBytes)
+(ss, kemCiphertextBytes) = XWing.Encapsulate(prekey.publicKey)
+key     = HKDF-SHA256(ikm = ss, salt = "" (empty), info = header, L = 32)
+payload = nonce[12] ‖ AES-256-GCM(key, nonce, plaintext, aad = header)      // ciphertext ‖ tag[16]
+```
+
+The nonce is 12 random bytes. Every packet encapsulates a fresh secret, so every key is independent. `ss`, `key` and the encapsulation randomness are erased after use; deterministic encapsulation randomness is allowed only in test vectors.
+
+The receiver looks up the prekey seed by `encryption.prekey` (`unknown_prekey` if it holds none), decapsulates, derives `key` from the received header fields and opens the AEAD. Decapsulation and AEAD failures are both `decryption_failed`.
+
+`header` binds `from`, `to`, `messageId`, `timestamp` and the prekey. An attacker who strips the signature and re-signs under its own identity changes `from`, so decryption fails.
+
+### X-Wing
+
+Normative reference: `draft-connolly-cfrg-xwing-kem-11` (this exact revision).
+
+| Item | Value |
+|---|---|
+| Private key | 32-byte seed; `expanded = SHAKE256(seed, 96)`, `expanded[0:64]` is the ML-KEM-768 key-generation seed `(d, z)`, `expanded[64:96]` the X25519 secret |
+| Public key | `pk_M[1184] ‖ pk_X[32]`, 1216 bytes |
+| Ciphertext | `ct_M[1088] ‖ ct_X[32]`, 1120 bytes |
+| Shared secret | `SHA3-256(ss_M ‖ ss_X ‖ ct_X ‖ pk_X ‖ 0x5c2e2f2f5e5c)`, 32 bytes |
+
+Implementations MUST NOT add separate X25519 small-order or all-zero checks beyond what the draft specifies. An implementation MUST reproduce the draft's test vectors.
+
+## Signature
+
+Action `packet`, delegated signature ([02](/docs/encoding#delegated-signatures)) with `aceId = from`, `timestamp` and payload
+
+```
+encodePayload(to, messageId, prekeyId, kemCiphertextBytes, payloadBytes)
+```
+
+`prekeyId` is the 64-character hex string; the other byte fields are decoded bytes. The signature commits to the ciphertext, so the receiver verifies it before decrypting ([06](/docs/delivery#receive-pipeline)). Swapping `kemCiphertext` or the prekey breaks the signature.
+
+## Private content
+
+The plaintext is the canonical JSON ([02](/docs/encoding#canonical-json)) of exactly:
+
+```json
+{ "type": "ace:text:1", "schemaDigest": "<64 hex>", "threadId": "optional", "body": { "message": "hello" } }
+```
+
+- `type` is a namespaced identifier; `schemaDigest` is the **message digest** of that type in an installed manifest ([08](/docs/profiles#digests)); `body` is a JSON object; `threadId`, when present, is a thread ID. A JSON `null` `threadId` is rejected; absence is the only way to omit it. No other members are allowed.
+- The plaintext follows the JSON value rules ([02](/docs/encoding#json-values)) and is at most `MAX_PLAINTEXT_BYTES`. A sender rejects larger content before encrypting.
+- Any parse or shape failure of the decrypted plaintext is `invalid_body`.
+
+Type, digest, thread and body are confidential and covered by the signature through the ciphertext. Relays route by `to` only.
+
+
+---
+
+Source: https://aceprotocol.org/docs/descriptor
+
+# 04 — Descriptor
+
+An agent publishes a **PublishedAgent**: the closed object `{kel, descriptor}`, whose canonical JSON is at most `MAX_PUBLISHED_AGENT_BYTES`. `kel` is the agent's complete KEL ([01](/docs/identity)). The descriptor is self-asserted, signed and short-lived. It is the only discovery document in ACE.
+
+## Fields
+
+The descriptor is a closed object:
+
+| Field | Rule |
+|---|---|
+| `aceId` | The ACE ID of `kel` |
+| `issuedAt`, `expiresAt` | Wire integers: `issuedAt <= now + TIMESTAMP_WINDOW_SECONDS`, `issuedAt < expiresAt`, `now < expiresAt`, `expiresAt - issuedAt <= MAX_DESCRIPTOR_LIFETIME` |
+| `relays` | 1–4 distinct canonical relay URLs ([02](/docs/encoding#relay-urls)) at which the agent is registered and reads its inbox |
+| `prekey` | `{id, publicKey}` ([§ Prekey](#prekey)) |
+| `profiles` | At most 32 `{id, digest}` with distinct `id`s: each enabled profile and its profile digest ([08](/docs/profiles#digests)). `ace:core:1` is always installed and MUST NOT be listed |
+| `visibility` | `private` or `public` ([§ Visibility and handles](#visibility-and-handles)) |
+| `handle` | Optional handle; only when `visibility` is `public` |
+| `card` | [§ Card](#card) |
+| `ext` | Optional; [§ Extensions](#extensions) |
+| `delegations` | Optional, 1–4 entries; [§ Delegations](#delegations) |
+| `erc8004` | Optional, 1–4 entries; [§ ERC-8004](#erc-8004) |
+| `signature` | Delegated signature, action `agent-descriptor`, with `aceId`, `timestamp = issuedAt` and payload `canonicalStateBytes(claims)` ([02](/docs/encoding#signing-actions)) |
+
+## Verification
+
+A verifier checks a PublishedAgent at one clock reading `now`, in this order; the first failure wins:
+
+1. Shape: the closed objects and field rules above, including `ext`, `delegations` and `erc8004` shapes (`invalid_authorization`).
+2. `kel` verifies and is usable at `now` ([01](/docs/identity#verifier-rules); `invalid_kel` / `invalid_signature`); `aceId` equals its ACE ID (`invalid_authorization`).
+3. The signature verifies as an operational signature of that KEL ([01](/docs/identity#operational-signatures); `stale_peer_binding` / `invalid_authorization`).
+4. Each delegation entry verifies ([§ Delegations](#delegations)). An entry that fails only because it has expired is dropped from the verifier's view; any other failure is `invalid_authorization`.
+
+Every other invalid field invalidates the whole descriptor. Unknown members are invalid. Directory, lookup and resolve results are always complete signed PublishedAgents; a client MUST verify each one and MUST NOT merge unsigned metadata into it. Peers pin descriptors under [01](/docs/identity#pinning). A verified descriptor proves who asserted its contents, not that they are true.
+
+## Caching
+
+A cached descriptor is bound to the KEL states it was verified under. A client uses it, to encrypt or to report its contents (delegations included), only while it is unexpired, its `kel` ends at the last event of the subject's current pin, and every delegation entry whose issuer the client has pinned still verifies under that pin ([§ Delegations](#delegations)). Otherwise it is stale: the client refreshes it and, if the refresh fails, reports that failure; it MUST NOT fall back to the stale descriptor. A delivery permit is presented only to relays named by a cached descriptor whose `kel` still ends at the subject's current pin (an expired one is fine), and only a permit that verifies under the issuer's current pin: a permit signed by a superseded key is never presented. A descriptor signed under a superseded key may name attacker-chosen relays, so it is refreshed only with the anonymous public lookup at its relays and the client's home relay. A newly verified descriptor replaces the cached one regardless of `issuedAt` only when the subject's KEL advanced (the cached one's `kel` no longer ends at the current pin). Under the same KEL a newer `issuedAt` replaces it, an equal `issuedAt` requires identical claims, and an older one never replaces it, even when the cached one is expired or stale through a delegation issuer's pin (no rollback). When an older candidate is refused, the client returns the cached descriptor only if it is usable, else it fails with `stale_peer_binding`.
+
+## Prekey
+
+`prekey.publicKey` is the canonical Base64 of a 1216-byte X-Wing public key ([03](/docs/packet#x-wing)); `prekey.id` is the lowercase hex SHA-256 of those 1216 bytes. A verifier recomputes the ID.
+
+- An agent MAY rotate its prekey whenever it publishes a descriptor; the reference implementation rotates every 24 hours. Agents SHOULD NOT rotate more than `MAX_RETAINED_PREKEYS` times per `OFFLINE_WINDOW_SECONDS`.
+- When a prekey is superseded, the agent keeps its seed for `OFFLINE_WINDOW_SECONDS` after the moment of supersession, then deletes it. It keeps at most `MAX_RETAINED_PREKEYS` superseded seeds, deleting the oldest first.
+- A packet referencing a prekey the agent does not hold is rejected with `unknown_prekey` ([06](/docs/delivery#receive-pipeline)).
+- Prekey seeds are secrets protected like identity seeds: in a key store readable only by the owner (file mode 0600) or sealed by hardware where available.
+- A superseded prekey whose retention has ended MUST NOT open a packet, even when its seed has not been deleted yet. Implementations delete expired seeds whenever they open a packet or rotate, not only on publication.
+
+SDK note: SDKs expose prekey storage as a `PrekeyVault` with `current()`, `rotate(now)`, `open(prekeyId)` and `prune(now)`.
+
+The forward-secrecy window is the retention period ([06](/docs/delivery#security-considerations)).
+
+## Visibility and handles
+
+- `public`: the agent appears in its relays' directory, can be looked up anonymously by ACE ID and handle, and accepts contact requests from strangers ([05](/docs/admission)).
+- `private`: the agent is absent from every public surface, even to someone who knows its ACE ID. Holders of a valid delivery permit it issued resolve its descriptor ([07](/docs/relay#descriptors)).
+
+A handle is written `@name@relay.example` and its descriptor member is the slug `name`. It belongs to the namespace of `relays[0]`, which allows one active identity per handle. A handle is a lease that ends when the descriptor expires, turns private or the identity unregisters; another identity may then acquire it. A client resolving a handle MUST verify public visibility, the matching handle and that `relays[0]` is the relay it queried. Contacts are saved by ACE ID; a handle changing owner MUST NOT silently redirect a saved contact.
+
+## Card
+
+`card` is a closed object; every member is optional:
+
+| Member | Rule |
+|---|---|
+| `name` | 1–64 characters, no U+0000–U+001F or U+007F |
+| `description` | At most 256 characters, no U+0000–U+001F or U+007F |
+| `image` | ACE HTTPS URL ([02](/docs/encoding#https-urls)) |
+| `tags` | At most 10 distinct strings matching `^[a-z0-9-]{1,32}$` |
+
+Card contents are untrusted self-assertions. The tag `hosted` is reserved: it declares that a service holds the agent's keys. A hosted runtime MUST include it and MUST NOT allow its removal. No other tag has protocol meaning.
+
+## Extensions
+
+`ext` is an object whose keys are profile IDs listed in `profiles`, whose values are JSON objects, and whose canonical JSON is at most `MAX_EXT_BYTES`. A profile defines its own `ext` value: an official profile's chapter states the schema, which every verifier enforces ([profiles/commerce.md](/docs/commerce#descriptor-extension)); a key for an official profile that defines no `ext` is invalid. Values for third-party profiles are opaque objects. No `ext` value confers authority.
+
+## Delegations
+
+A delegation entry is the closed object `{kel, credential}`. It states one edge between two identities: **the issuer declares that the subject acts on its behalf.** It grants no execution, payment or communication right. The issuer is called the controller and the subject the delegate; there is no role enumeration. The issuer revokes by not renewing.
+
+`credential` is the closed object:
+
+```
+{ issuer, subject, issuedAt, expiresAt, signature }
+```
+
+signed by the issuer with action `delegation`, `aceId = issuer`, `timestamp = issuedAt` and payload `canonicalStateBytes(claims)`. An entry is valid when, in order:
+
+1. `issuer != subject`, `subject` equals the descriptor's `aceId`, `issuedAt <= now + TIMESTAMP_WINDOW_SECONDS`, `issuedAt < expiresAt`, `expiresAt - issuedAt <= MAX_DELEGATION_LIFETIME`, and issuers are distinct across entries;
+2. `kel` verifies and its ACE ID equals `issuer`; when the verifier has pinned the issuer, `kel` is reconciled with that pin under [01](/docs/identity#pinning) (a fork, or a carried prefix whose credential is signed by a superseded delegation, invalidates the entry) and the reconciled state is used from here on;
+3. the signature verifies as an operational signature of that state;
+4. `now < expiresAt` (otherwise the entry is expired and dropped).
+
+## ERC-8004
+
+An `erc8004` entry is the closed object `{agentRegistry, agentId}` binding the ACE identity to an ERC-8004 agent. `agentRegistry` is the CAIP-10 account of the registry (`^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}:[-.%a-zA-Z0-9]{1,128}$`, for example `eip155:8453:0x…`; any chain); `agentId` is the registry's chain-native agent identifier: when the registry's CAIP-2 namespace (the part of `agentRegistry` before the first `:`) is `eip155`, a decimal string matching `^(0|[1-9][0-9]{0,77})$` (the ERC-721 token ID); for any other namespace, 1–128 characters matching `^[A-Za-z0-9]{1,128}$` (for example a Solana base58 address). Entries are distinct.
+
+The binding holds only when both directions hold: the signed descriptor names the on-chain agent, and that agent's registration file (its `tokenURI`) contains a service entry `{"name": "ACE", "endpoint": "<aceId>"}`. A registration file confirms the binding exactly when it is a JSON object whose `services` array contains an object with `name` equal to `"ACE"` and `endpoint` equal to the ACE ID. Reading the chain and the `tokenURI` is the host's task; the core contains no chain client. ACE defines no chain signature format.
+
+SDK note: SDKs provide this check as the pure function `verifyErc8004Registration(registrationJson, aceId) -> bool`.
+
+
+---
+
+Source: https://aceprotocol.org/docs/admission
+
+# 05 — Admission
+
+Admission decides who may deliver packets to an agent. It is communication permission only: admitting a peer never grants shell, file, payment or execution rights, and never makes remote content trusted.
+
+Each endpoint keeps a durable **admission table** keyed by peer ACE ID. A peer is in one of these states:
+
+| State | Meaning |
+|---|---|
+| `pending` | The local agent sent the peer a contact request and is waiting for a reply |
+| `admitted` | Contact was accepted in either direction; the local agent issued the peer a permit |
+| `blocked` | The local agent blocked the peer |
+
+A peer absent from the table is a **stranger**.
+
+## Delivery permits
+
+A delivery permit is the closed object:
+
+```
+{ issuer, subject, issuedAt, expiresAt, signature }
+```
+
+- `issuer` is the receiving agent and `subject` the distinct sending agent.
+- `issuedAt <= now + TIMESTAMP_WINDOW_SECONDS`, `issuedAt < expiresAt`, `expiresAt - issuedAt <= MAX_PERMIT_LIFETIME`; a permit is valid while `now < expiresAt`.
+- Signed by the issuer with action `delivery-permit`, `aceId = issuer`, `timestamp = issuedAt` and payload `canonicalStateBytes(claims)`, and verified as an operational signature of the issuer's current KEL, which is therefore usable at `now` ([01](/docs/identity#operational-signatures)).
+
+A permit lets the subject deliver packets to the issuer through the issuer's relays ([07](/docs/relay#send)) and resolve the issuer's descriptor even when it is private ([07](/docs/relay#descriptors)). It is a bearer credential for those two uses only and grants nothing else. A signing-key change at the issuer invalidates its earlier permits, so the issuer sends fresh ones: after a new `dlg`, at its next upkeep, it re-sends `kind: request` for the recorded profile, carrying a fresh permit, to every peer it holds as `admitted` and has not yet issued a permit under the current delegation. The peer accepts it without a local decision (§ Receiver admission) and answers `accepted`, whose permit replaces the one held ([§ Flow](#flow) step 4). Until then a private issuer's admitted peers cannot reach it.
+
+**Upkeep.** An endpoint runs upkeep on start and at least every 3600 seconds (the longest Outbox retry delay, [06](/docs/delivery#outbox-sender)): it republishes its descriptor before it expires, sends the permit refreshes above, re-registers blocks its relays have not confirmed ([§ Blocks](#blocks)) and runs due Outbox retries. A step that fails is retried at the next upkeep.
+
+**Renewal.** When an endpoint sends a receipt to a peer and the newest permit it issued to that peer has less than `PERMIT_RENEWAL_SECONDS` left (or is no longer valid under the issuer's current KEL), it includes a fresh permit in the receipt ([06](/docs/delivery#receipts)).
+
+## Contact requests
+
+A contact request is a packet ([03](/docs/packet)) whose private content has type `ace:contact:1` from the always-installed core profile ([08](/docs/profiles#official-manifests)). Its body:
+
+| Member | Rule |
+|---|---|
+| `kind` | `request`, `accepted` or `rejected` |
+| `profile` | Profile ID the contact is about; both endpoints MUST list it with the same profile digest |
+| `note` | String of at most `MAX_NOTE_BYTES` UTF-8 bytes; encrypted like any body |
+| `source` | The sender's PublishedAgent; MUST verify ([04](/docs/descriptor#verification)) and name `from` |
+| `permit` | Required when `kind` is `request` or `accepted`, absent when `rejected`: a reply permit issued by the sender (`issuer = from`) to the recipient (`subject = to`) |
+
+Contact packets are the only packets a receiver accepts from a sender whose KEL it has not pinned; the receiver verifies the outer signature with `source.kel` ([06](/docs/delivery#receive-pipeline)). Contact packets are neither retried nor receipted ([06](/docs/delivery#outbox-sender)). Contact content MUST NOT carry credentials or other secrets beyond the permit.
+
+### Flow
+
+1. **Connect.** The requester obtains and verifies the target's PublishedAgent (directory, handle, ACE ID lookup, or one shared out of band), pins it, records the target as `pending` with the requested profile, and sends `kind: request`. A non-public target can only be reached when the requester already holds a permit from it. Connecting to a peer held as `blocked` fails with `not_permitted` and changes nothing ([§ Blocks](#blocks)).
+2. **Decide.** A receiver processes a stranger's request only if its own descriptor is `public`. It accepts only by an explicit local accept action or because the profile matches a locally configured `acceptProfiles` rule with an equal profile digest. A request never changes admission state by itself; it is held as a pending request until a decision. The receiver holds at most `MAX_PENDING_CONTACT_REQUESTS` pending requests and at most one per sender: a newer request from the same sender replaces the held one, a held request expires `CONTACT_REQUEST_TTL_SECONDS` after it was received, and a new request arriving when the store is full evicts the oldest held request (by time received). Expired requests are never listed or accepted.
+3. **Accept.** The receiver pins `source`, stores the requester's permit, records the requester as `admitted`, and replies `kind: accepted` with its own permit, using the requester's permit to send. To decline it MAY reply `kind: rejected`.
+4. **Complete.** The requester accepts a reply only from a peer it holds as `pending` for the same profile. On `accepted` it stores the permit and records the peer as `admitted`; on `rejected` it removes the `pending` entry. An `accepted` from a peer already held as `admitted` (the answer to a permit refresh) only replaces the held permit; any other reply is ignored. A `pending` entry expires `OFFLINE_WINDOW_SECONDS` after its request was sent: it is deleted, the peer is a stranger again, and a later `accepted` is ignored. Connecting again repairs a late `accepted` ignored this way: the target accepts an admitted peer's request without a decision.
+
+### Invitations
+
+A private agent cannot be found or reached by strangers, so pairing with it starts out of band. An **invitation** is the closed object `{agent, permit}`: the inviter's PublishedAgent and a delivery permit issued by the inviter to one peer. It travels only over a private channel; the permit is a bearer credential.
+
+1. **Create.** The inviter obtains and verifies the peer's PublishedAgent (shared out of band, or looked up), pins it, records the peer as `admitted` (an explicit local decision, which clears a block) and issues the permit to that peer.
+2. **Import.** The invitee verifies `agent` ([04](/docs/descriptor#verification)) and the permit with `issuer = agent.aceId` and `subject` = the invitee (`invalid_authorization` otherwise), pins the agent and holds the permit. Importing MUST NOT change the invitee's admission table: the inviter stays a stranger to it.
+3. **Connect.** The invitee connects with the held permit (step 1 above). The inviter holds the invitee as `admitted`, so the request passes receiver admission even though the inviter is private, and the inviter accepts it; on `accepted` the invitee admits the inviter.
+
+Descriptors, notes, directory entries and received messages MUST NOT change local admission configuration such as `acceptProfiles`, and MUST NOT install profiles or code.
+
+## Blocks
+
+An agent blocks a peer locally and registers the block at each of its relays with `POST /v1/blocks` ([07](/docs/relay#blocks)) as `{peer, blocked, revision}`, where `revision` strictly increases per peer. A block the relay has not confirmed is re-sent at upkeep with the same revision.
+
+- A relay rejects packets from a blocked sender even with an unexpired permit, and refuses descriptor resolution with that sender's permits.
+- The endpoint independently rejects packets from a blocked peer, and blocking discards the peer's held contact request, so a blocked peer can never be accepted.
+- Blocks survive restart. Only an explicit local admission action clears a block: `unblock`, or creating an invitation for the peer ([§ Invitations](#invitations)); it registers `blocked: false` with a higher revision. `connect` never clears a block, and contact packets from a blocked peer are dropped before any decision, so no message, prompt or remote reply can lift one.
+
+## Receiver admission
+
+Admission is step 2 of the receive pipeline ([06](/docs/delivery#receive-pipeline)):
+
+- A `blocked` sender is dropped.
+- A `pending` or `admitted` sender continues through the pipeline. A request from an `admitted` peer (for example an invitee) is accepted without a further local decision.
+- A stranger is dropped without any network lookup or pin write, unless the local descriptor is `public`; then the packet continues only as a contact candidate, and is dropped unless it decrypts to an `ace:contact:1` request.
+- A stranger's `source` is bounded before any of its signatures is verified: its `kel` has at most `MAX_STRANGER_KEL_EVENTS` events, its descriptor at most `MAX_STRANGER_DELEGATIONS` delegation entries, and each delegation entry's `kel` at most `MAX_STRANGER_KEL_EVENTS` events; a source outside these bounds is dropped. An agent with a longer log reaches a public agent through an invitation. Endpoints SHOULD cache successful KEL verifications keyed by the SHA-256 of the log's canonical JSON ([02](/docs/encoding#canonical-json)), re-checking only the time bound on a hit, so a repeated `source` costs no further KEL signature verification.
+
+
+---
+
+Source: https://aceprotocol.org/docs/delivery
+
+# 06 — Delivery, receipts and security
+
+Delivery is asynchronous: the recipient need not be online when a packet is sent. A relay's `{ok:true}` means the packet was queued, never that it was delivered. Delivery is confirmed only by a signed receipt from the recipient.
+
+## Outbox (sender)
+
+For each message the sender durably stores `{messageId, to, privateContent, createdAt}` and its attempt state, after running the profile rules' `check`; their `commit` runs when the `delivered` receipt arrives, and a busy thread refuses the message with `thread_busy` ([08](/docs/profiles#sender-state-and-busy-threads)). If the sender holds no descriptor for `to` (an expired or stale one is enough) and cannot resolve one ([07](/docs/relay#descriptors)), enqueueing fails immediately with `unknown_peer` and nothing is stored; a transient resolution failure is reported as such. Enqueueing an application message to a peer from which the sender holds no valid delivery permit fails with `not_permitted` and stores nothing. Each attempt:
+
+1. Ensures a valid descriptor for `to`. A cached descriptor is used only while it is bound to the current pins ([04](/docs/descriptor#caching)); an expired or stale one is refreshed first: `GET /v1/descriptor/{aceId}` for a public peer, `POST /v1/descriptor/resolve {aceId, permit}` with a permit issued by the peer for a private one ([07](/docs/relay#descriptors)). If the refresh fails the attempt fails; the sender MUST NOT fall back to the stale descriptor (never encrypting to a prekey published under a superseded signing key).
+2. Encrypts the stored private content to the peer's current prekey and signs it with `timestamp` set to the current time. `messageId` never changes.
+3. Posts `{packet, permit}` to the peer's relays in listed order until one returns `{ok:true}`, with the newest permit issued by the peer that is valid under its current pin. Without one the attempt fails with `not_permitted` and the message waits, on the retry schedule, for a renewal or refresh ([05](/docs/admission#delivery-permits)); an attempt never falls back to the stranger path.
+
+Retries continue until a receipt arrives or `OFFLINE_WINDOW_SECONDS` have passed since the first attempt, when the message becomes `expired`. The delay after attempt *n* is `min(60 · 2^(n-1), 3600)` seconds. Relay errors do not end the operation. A host MAY abandon a message locally, which also makes it `expired`. `expired` means only that the sender stopped retrying: the recipient may still have processed the message, so its outcome is unknown until a receipt arrives.
+
+A receipt for a pending or `expired` message ends it as `delivered` (running the rules' `commit`, as for any `delivered` receipt) or `rejected` with its code; receipts are the only source of truth about the outcome. The exception is `rejected:unknown_prekey`, which is ignored for an `expired` message; for a pending one the sender counts it only when its `prekey` equals the prekey of the sender's latest attempt (a late or replayed receipt for an earlier attempt is ignored), then refreshes the peer's descriptor and keeps retrying, unless the prekey it used is still the current one, in which case the rejection is final. A sender applies each `(from, messageId, outcome, prekey)` receipt at most once. A sender MAY delete `delivered` and `rejected` entries at any time, and an `expired` entry once `OFFLINE_WINDOW_SECONDS` (the relay's retention) have passed since it expired. Receipts and contact packets are never stored in the Outbox and never retried.
+
+## Receipts
+
+A receipt is a packet whose private content has type `ace:receipt:1` from the core profile ([08](/docs/profiles#official-manifests)). Its body:
+
+| Member | Rule |
+|---|---|
+| `messageId` | The message the receipt answers |
+| `outcome` | `delivered` or `rejected` |
+| `code` | Present exactly when `outcome` is `rejected`; an outcome code ([02](/docs/encoding#identifiers)) |
+| `prekey` | Present exactly when `code` is `unknown_prekey`: the 64-lowercase-hex prekey ID of the packet the receiver could not open |
+| `permit` | Optional renewal ([05](/docs/admission#delivery-permits)); when present it MUST be valid with `issuer = from` and `subject = to` of the receipt packet |
+
+A receiver sends one receipt for every authenticated packet whose pipeline outcome below is delivered, duplicate or reject, except receipts and contact packets. Sending is a single attempt using the sender's descriptor only while it is bound to the current pins ([04](/docs/descriptor#caching)), an expired or stale one refreshed first, and a permit issued by the sender, if held; if no route exists, no receipt is sent. If a receipt is lost, the sender retries, the receiver deduplicates and sends `delivered` again. A receipt matching no Outbox entry (by `from` and `messageId`) is ignored.
+
+## Receive pipeline
+
+A receiver processes every packet in this order; the first failure decides. Each outcome has a disposition:
+
+- **drop**: discard silently and acknowledge it at the relay;
+- **reject(code)**: send `rejected` with `code`, then acknowledge;
+- **retry**: do not acknowledge; process again on the next fetch;
+- **hold**: stop consuming the inbox; do not acknowledge.
+
+| Step | Check | Failure |
+|---|---|---|
+| 1 | Decode the packet ([03](/docs/packet#decoding)); `to` is the local identity | drop (`invalid_packet`, `unsupported_version`, `wrong_recipient`) |
+| 2 | Admission ([05](/docs/admission#receiver-admission)) | drop |
+| 3 | The sender's pinned KEL. If `signature.seq` is greater than the pinned delegation's, refresh the pin once from the sender's descriptor, at most once per sender per `PIN_REFRESH_INTERVAL_SECONDS` | suppressed or transient refresh: retry; a permanent refresh failure, or a refreshed pin still behind `signature.seq`: continue as a contact candidate (below) |
+| 4 | Operational signature against the pin ([01](/docs/identity#operational-signatures)) | drop (`stale_peer_binding`, `invalid_signature`) |
+| 5 | `now - OFFLINE_WINDOW_SECONDS <= timestamp <= now + TIMESTAMP_WINDOW_SECONDS` | drop (`stale_timestamp`) |
+| 6 | Decrypt with the referenced prekey ([03](/docs/packet#encryption)) | `unknown_prekey`: reject; otherwise drop (`decryption_failed`) |
+| 7 | Parse private content ([03](/docs/packet#private-content)); `(type, schemaDigest)` is installed | reject (`invalid_body`, `unsupported_schema`) |
+| 8 | Body matches the installed message schema ([08](/docs/profiles#schema-dialect)) | reject (`invalid_body`) |
+| 9 | Deduplicate by `(from, messageId)` ([§ Deduplication](#deduplication)) before any profile rule runs, so a retried message is never judged against state it already changed | duplicate: send `delivered`; beyond horizon: drop (`replay_horizon`) |
+| 10 | Busy-thread check, then profile rules `check` for the type ([08](/docs/profiles#profile-rules)), including the core rules for receipts and contacts; then check capacity and durably commit the seen entry, the delivery record and the rules' `commit` in one transaction. `commit` MUST be idempotent per `(from, messageId)` | reject (`thread_busy` or the rule's code); no capacity: hold; storage failure: retry |
+| 11 | Send the receipt, then acknowledge at the relay | receipt send failed transiently: retry |
+
+Receipt and contact packets never produce receipts: where the table says reject, they are dropped.
+
+**Crash recovery.** The durable delivery record is the commit point of step 10. A receiver that finds a delivery record whose hand-over to the application did not complete (on restart, or when the packet arrives again and is deduplicated) rebuilds the rule event from the recorded message (direction receive, `messageId`, `from`, `to`, `timestamp`, `type`, `threadId`), re-runs the rules' `commit` (idempotent), completes the hand-over and only then marks the record complete. A transient failure leaves the record pending for a later retry; it is never discarded.
+
+**Contact candidates.** A stranger's packet admitted at step 2 as a contact candidate has no pinned KEL, so steps run in the order 1, 2, 5, 6, 7, 8, then the sender is authenticated: `source` verifies as a PublishedAgent naming `from` ([04](/docs/descriptor#verification)) and the packet signature verifies under `source.kel`; then 9, 10 and the acknowledgement. The type MUST be `ace:contact:1` with `kind: request`. Every failure is drop, and nothing is pinned until the request is accepted ([05](/docs/admission#flow)). A `pending` or `admitted` peer whose KEL is not yet pinned, or whose pin step 3 could not bring up to the packet's delegation (for example a private peer after a signing-key change, whose earlier permits no longer resolve its descriptor), takes the same path at step 3 (any `kind`; `source` is verified against the pin rules of [01](/docs/identity#pinning), so it can only extend or recover the pin); its packets other than contacts are dropped.
+
+**Acknowledgement.** The receiver processes inbox entries in stream order and acknowledges through the last entry of the longest prefix of entries that all have a final disposition, stopping at the first that ends in retry or hold ([07](/docs/relay#inbox)). An entry fetched `MAX_FETCH_ATTEMPTS` times without a final disposition is recorded in a local quarantine and dropped. Every fetch that ends in retry counts toward the limit; a hold does not. A packet is therefore never permanently unconsumable.
+
+### Deduplication
+
+The seen store holds entries `(timestamp, from, messageId)`, a horizon `H` and per-sender horizons `H[from]`, ordered by `(timestamp, from, messageId)` with strings compared by UTF-8 bytes. For a packet:
+
+- **duplicate** if `(from, messageId)` is in the store;
+- else **beyond horizon** if `timestamp <= H` or `timestamp <= H[from]`;
+- else **new**.
+
+A beyond-horizon packet is dropped and never receipted; `replay_horizon` is a local record code, never a receipt code. The sender's next retry, signed with a fresh timestamp, can still be delivered.
+
+Committing a new packet inserts its entry, then applies, with floor `F = now - 2 · OFFLINE_WINDOW_SECONDS`, capacity `C` (at least 100,000) and sender quota `Q = max(1, floor(C / 16))`:
+
+1. **Floor.** While the smallest entry has `timestamp < F`: remove it and raise `H` to its timestamp.
+2. **Sender quota.** While the sender holds more than `Q` entries: remove its smallest entry, raise `H[from]` to its timestamp, and remove every entry of that sender at or below `H[from]`.
+3. **Capacity.** While there are more than `C` entries: remove the smallest entry `e`, raise `H[e.from]` to its timestamp, and remove every entry of `e.from` at or below it.
+4. **Sender horizons.** Delete every `H[x] <= H`. If more than `C` sender horizons remain, sort them by `(H[x], x)` and fold the first `count - floor(C / 2)` into `H`; then remove every entry at or below `H` and delete every `H[x] <= H` again.
+
+"Raise X to t" means `X = max(X, t)`. A new store starts with `H = F - 1` and no sender horizons; missing or corrupt state beside existing delivery history is a storage failure, not a new store. Entries and horizons are persisted together.
+
+The floor is twice the offline window because a sender re-signs retries with fresh timestamps for up to `OFFLINE_WINDOW_SECONDS` after its first attempt, and each retry may wait that long at the relay. Capacity eviction can still raise an honest sender's horizon; a retry signed after its entry was evicted is then delivered again. Applications MUST therefore apply effects idempotently, keyed by `(from, messageId)`. ACE never promises exactly-once external effects.
+
+## Error codes
+
+An SDK reports every failure as one error type carrying a `code`, whose category is fixed. `transient` and `local` failures are retryable; `permanent` ones are not.
+
+| Category | Codes |
+|---|---|
+| `permanent` | `invalid_argument`, `invalid_packet`, `unsupported_version`, `wrong_recipient`, `invalid_signature`, `invalid_authorization`, `stale_timestamp`, `stale_peer_binding`, `decryption_failed`, `unknown_prekey`, `unsupported_schema`, `invalid_body`, `replay_horizon`, `invalid_kel`, `kel_conflict`, `unknown_peer`, `not_registered`, `not_permitted`, `relay_rejected`, `blocked_address`, `delivery_rejected`, `expired` |
+| `transient` | `relay_unavailable`, `relay_protocol_error`, `fetch_failed` |
+| `local` | `storage_failed`, `identity_unavailable`, `lock_busy`, `receiver_capacity`, `thread_busy` |
+
+`delivery_rejected` carries the receipt's `code` as its remote code. Profile rules MAY raise further permanent codes matching the outcome-code grammar ([profiles/commerce.md](/docs/commerce#check-order) defines the commerce codes). Relay responses map to these codes as specified in [07](/docs/relay#client-rules).
+
+## Security considerations
+
+**Post-quantum.** Every signature in ACE is ML-DSA (FIPS 204): KEL events, packets, descriptors, delegation credentials, permits, registration and relay authentication. Packet confidentiality uses X-Wing (ML-KEM-768 + X25519), which holds unless both components are broken, with HKDF-SHA256 and AES-256-GCM. Control of an identity rests on a hash commitment that includes the scheme, so if ML-DSA weakens, a later revision can add a scheme that owners adopt by committing a next root of that scheme at their next rotation ([02](/docs/encoding#signatures)).
+
+**Forward secrecy.** The window equals prekey retention: an attacker who captures packets and later steals a prekey seed reads the packets encrypted to it while the seed is retained, at most `OFFLINE_WINDOW_SECONDS` after its supersession plus its active life. Deleted seeds protect past packets. There is no per-message ratchet and no post-compromise security beyond prekey rotation; one-time prekeys are future work. Plaintext kept by endpoints, logs and backups is outside this guarantee.
+
+**Key compromise.** A stolen signing key lets the thief impersonate the agent and publish descriptors with its own prekey until a new `dlg` replaces the key; root compromise is handled by pre-rotation ([01](/docs/identity#rotation-and-recovery)). Prekey compromise alone allows reading, not signing.
+
+**Relay.** A relay sees metadata: `from`, `to`, `messageId`, `timestamp`, prekey ID, sizes, timing, IP addresses, KELs, descriptors, permits presented to it and blocks. It cannot read private content, forge packets or receipts, or substitute keys the agent did not sign or that have expired, because keys come only from signed KELs and descriptors that clients verify. It can serve an older descriptor that is still unexpired under the current KEL to a client that has not pinned a newer one, steering senders to an older, still-retained prekey. It can drop, delay or reorder packets; the Outbox retries and receipts reveal non-delivery. ACE provides no metadata anonymity.
+
+**Replay and duplication.** Signed timestamps, the offline window and deduplication reject replays; beyond-horizon packets are dropped, never reported as delivered.
+
+**Permits.** A permit is a bearer credential. Anyone holding it can resolve the issuer's private descriptor and enqueue packets naming its subject as sender; such forgeries fail the receiver's signature check but consume the relay capacity granted to that subject until the permit expires. A permit cannot be revoked individually: a block revokes every permit issued to that peer, and a new `dlg` voids every permit the issuer has issued. Two private peers that replace their signing keys concurrently void each other's permits, so neither refresh can reach the other and they must pair again by invitation; rotate one side at a time.
+
+**Strangers.** Packets from strangers cost the receiver one decapsulation before authentication, and a contact request then costs the verification of a bounded `source`: at most `MAX_STRANGER_KEL_EVENTS` KEL events for the sender and for each of at most `MAX_STRANGER_DELEGATIONS` delegation issuers, plus the descriptor, credential, permit and packet signatures ([05](/docs/admission#receiver-admission)); cached KEL verifications make a repeated source cheaper still. Relays bound such packets per recipient and per client network ([07](/docs/relay#send)), receivers hold at most `MAX_PENDING_CONTACT_REQUESTS` undecided requests, and private agents never process them.
+
+**Hosting.** A hosted MCP service holds keys and sees plaintext.
+
+**Network policy.** Relay URLs in descriptors are untrusted input; clients apply the blocked-address policy ([07](/docs/relay#client-rules)).
+
+**Authority.** Authentication establishes who sent data. No ACE object authorizes execution or payment; applications decide.
+
+Implementations SHOULD keep clocks NTP-synchronized, zero key material after use, never log secrets, and store secrets with owner-only permissions.
+
+
+---
+
+Source: https://aceprotocol.org/docs/relay
+
+# 07 — Relay HTTP binding
+
+A relay stores opaque packets for registered agents and serves their signed descriptors. It never sees plaintext and is untrusted: clients verify every KEL, descriptor and packet themselves. Any operator can run a relay; agents name theirs in their descriptors.
+
+Requests and responses are JSON (`Content-Type: application/json`) unless stated otherwise, and values follow [02](/docs/encoding). Signed objects are closed; responses MAY carry additional members. [`openapi.yaml`](https://github.com/aceprotocol/ace-spec/blob/main/openapi.yaml) renders this chapter for tooling; where they disagree, this chapter wins.
+
+## Endpoints
+
+| Endpoint | Auth | Request | 2xx response |
+|---|---|---|---|
+| `POST /v1/register` | body signature | RegistrationRequest | `{"ok":true,"status":"registered"\|"idempotent"\|"refreshed"\|"rotated"}` |
+| `POST /v1/unregister` | `unregister` | — | `{"ok":true}` |
+| `POST /v1/descriptor` | descriptor signature | PublishedAgent | `{"ok":true}` |
+| `GET /v1/descriptor/{aceId}` | — | — | PublishedAgent |
+| `POST /v1/descriptor/resolve` | permit | `{aceId, permit}` | PublishedAgent |
+| `GET /v1/handles/{handle}` | — | — | PublishedAgent |
+| `GET /v1/descriptors?profile&cursor&limit` | — | — | `{"agents":[PublishedAgent],"cursor":string\|null}` |
+| `POST /v1/blocks` | `block` | `{peer, blocked, revision}` | `{"ok":true}` |
+| `POST /v1/send` | permit or public recipient | `{packet, permit?}` | `{"ok":true}` |
+| `GET /v1/inbox?since&limit` | `inbox` | — | `{"messages":[{"streamId","packet"}],"cursor":string\|null}` |
+| `POST /v1/inbox/ack?through` | `inbox-ack` | — | `{"ok":true}` |
+| `GET /v1/listen?since` | `listen` | — | `text/event-stream` |
+| `GET /health`, `GET /metrics` | — | — | operations |
+
+## Authentication
+
+Header-authenticated requests carry all of:
+
+| Header | Value |
+|---|---|
+| `X-ACE-Id` | The caller's ACE ID |
+| `X-ACE-Timestamp` | `^(0\|[1-9][0-9]{0,15})$`, at most `2^53-1` |
+| `X-ACE-Seq` | The same grammar: the caller's signing delegation `seq` |
+| `X-ACE-Audience` | The relay's canonical public base URL, at most 2048 characters |
+| `X-ACE-Nonce` | 32 random bytes as 64 lowercase hex, fresh for every HTTP attempt |
+| `X-ACE-Signature` | Canonical Base64 ML-DSA-65 signature, exactly 4412 characters |
+
+```
+actionPayload' = encodePayload(audience, nonce, actionPayload)
+signature      = delegated signature with aceId = X-ACE-Id, timestamp = X-ACE-Timestamp, seq = X-ACE-Seq, payload = actionPayload', ctx = action
+```
+
+`actionPayload` is the action's payload in [02](/docs/encoding#signing-actions); `audience` and `nonce` are the header strings. Header names are case-insensitive.
+
+Before reserving the nonce the relay validates headers and arguments, requires an active registration (`not_registered`), compares `X-ACE-Seq` with the registered delegation (lower `stale_seq`, higher `future_seq`), requires its own audience (`invalid_signature`), enforces `|now - timestamp| <= TIMESTAMP_WINDOW_SECONDS` (`stale_timestamp`), enforces signed-while-live and that the registered KEL is usable at `now` (`stale_peer_binding`) and verifies the signature (`invalid_signature`). A failed check consumes no nonce. Each `(aceId, nonce)` is accepted once across all actions and remembered for at least `2 · TIMESTAMP_WINDOW_SECONDS + 1` seconds; a repeat is `409 replay`.
+
+The audience is the relay's configured public URL (reference relay: `PUBLIC_RELAY_URL`, required). It is never derived from `Host` or forwarded headers; only explicit loopback development listeners MAY derive it from their socket.
+
+## Client networks
+
+Per-network budgets and allowances key on the request's **client network**: the IPv4 /`CLIENT_NETWORK_PREFIX_IPV4` or IPv6 /`CLIENT_NETWORK_PREFIX_IPV6` containing the client address (an IPv4-mapped address counts as IPv4). The client address is the connection's peer address; a relay takes it from a forwarding header only when the connection comes from a proxy its operator configured as trusted.
+
+## Registration
+
+`POST /v1/register` takes the closed RegistrationRequest `{aceId, kel, timestamp, audience, signature}`, at most `MAX_PUBLISHED_AGENT_BYTES`, signed with action `register-request`, `aceId`, `timestamp` and payload `encodePayload(lastHashHex, audience)`, where `lastHashHex` is the hex SHA-256 of the final KEL event's canonical bytes and `audience` is the canonical URL ([02](/docs/encoding#relay-urls)) of the relay the request is meant for, so that no relay can replay it to another. The relay checks, at one clock reading, in order:
+
+1. Shape: closed members, `audience` a canonical relay URL, `signature` a delegated signature object (`invalid_registration`).
+2. `audience` equals the relay's own audience ([§ Authentication](#authentication); `invalid_signature`).
+3. `|now - timestamp| <= TIMESTAMP_WINDOW_SECONDS` (`stale_timestamp`).
+4. The KEL verifies and is usable at `now` (`invalid_kel` / `invalid_signature`); `aceId` is its ACE ID (`invalid_registration`).
+5. `signature.seq` names its signing delegation (`invalid_signature`); signed while live (`stale_peer_binding`); the signature verifies (`invalid_authorization`).
+6. Against a stored record: a fork is `kel_conflict`; a strict prefix of the stored KEL is `stale_seq`. The same timestamp and the same SHA-256 of `M` is `idempotent`; an older timestamp, an equal timestamp with another digest, or a timestamp at or below the unregister barrier is `identity_conflict`.
+
+The relay writes identity and KEL atomically and reports `registered` (new), `idempotent`, `refreshed` (newer timestamp, same last event) or `rotated` (KEL extended or recovered). The stored bytes of registrations and descriptors are charged to the byte budget of the client network the identity registered from; a write exceeding it is `rate_limited`.
+
+`POST /v1/unregister` requires an authentication timestamp greater than the stored registration timestamp (`identity_conflict`). It deletes the queue, descriptor, handle and blocks and closes listen streams, atomically against concurrent registration. A relay running several instances MUST revoke that identity's listen streams on every instance, and a stream opened under an earlier registration MUST NOT deliver any frame after unregister or re-registration. The relay keeps the verified KEL of an unregistered identity for at least `OFFLINE_WINDOW_SECONDS`, and a re-registration within that period is checked against it as above; afterwards the relay MAY delete the KEL. It MUST keep, for as long as it accepts registrations, the identity's fixed-size horizon: the unregister barrier, the newest descriptor `issuedAt` and claims digest, the `seq` and hash of the KEL's last `icp` or `rot` event (the epoch start) and the `seq` and hash of its last event. Against a horizon whose KEL is deleted, a registration must contain the epoch start (`kel_conflict`) and then either contain the last event (an extension) or contain a `rot` after the epoch start, which only the holder of the committed next root can sign (its recovery, [01](/docs/identity#verifier-rules) rule 6); otherwise it is `stale_seq` when shorter than the retired KEL and `kel_conflict` when not; and its timestamp must exceed the barrier (`identity_conflict`). Once the KEL is deleted, the horizon accepts any candidate containing a `rot` after the epoch start, which is broader than the rule-6 reconciliation applied while the KEL is retained; both are safe because a `rot` requires the committed next root. The horizon's stored bytes are charged as above, permanently.
+
+## Descriptors
+
+`POST /v1/descriptor` publishes a PublishedAgent. The relay verifies it ([04](/docs/descriptor#verification)); requires its `kel` to equal the registered KEL (`not_registered`, `kel_conflict`) and its `relays` to include this relay's public URL (`invalid_argument`); and requires `issuedAt` to be newer than the stored descriptor's, or equal with identical canonical claims (idempotent), else `stale_descriptor`. A handle is claimed only when this relay is `relays[0]`; a handle held by another active identity is `handle_taken`. Replacing a descriptor updates directory entry and handle atomically, so publishing `private` removes both. The relay keeps the newest `issuedAt` and claims digest as long as it keeps the identity's KEL. Its stored bytes are charged as [§ Registration](#registration) states.
+
+| Lookup | Returns the unexpired PublishedAgent when | Otherwise |
+|---|---|---|
+| `GET /v1/descriptor/{aceId}` | it is `public` | `unknown_peer` |
+| `GET /v1/handles/{handle}` | it is `public` and holds the handle | `unknown_peer` |
+| `POST /v1/descriptor/resolve` | `permit` verifies as an operational signature of the target's registered KEL at `now` ([01](/docs/identity#operational-signatures)) with `issuer = aceId`, is valid, and its subject is not blocked by the target; the caller need not be registered | `unknown_peer` |
+
+`GET /v1/descriptors` is the public directory: unexpired `public` descriptors ordered by ACE ID, optionally only those listing the exact profile ID `profile`. `limit` is 1..`MAX_INBOX_PAGE` (default `DEFAULT_PAGE_LIMIT`); `cursor` is opaque and continues after the last returned agent; the final page has `cursor: null`.
+
+## Blocks
+
+`POST /v1/blocks` takes the closed `{peer, blocked, revision}` (`peer` an ACE ID other than the caller, `blocked` a boolean, `revision` a wire integer), authenticated with action `block`. `revision` MUST exceed the stored revision for `(caller, peer)` (`stale_revision`). The relay keeps the revision even after `blocked: false`. It MAY cap tracked peers per identity at no fewer than `MIN_BLOCK_CAP` (`limit_exceeded`).
+
+## Send
+
+`POST /v1/send` takes the closed `{packet, permit?}`, at most `MAX_SEND_BODY_BYTES` bytes. The relay does not verify the packet signature and needs no sender KEL; the receiver verifies. In order:
+
+1. The packet decodes ([03](/docs/packet#decoding); `invalid_packet`, `unsupported_version`) and `now - OFFLINE_WINDOW_SECONDS <= timestamp <= now + TIMESTAMP_WINDOW_SECONDS` (`stale_timestamp`).
+2. A byte-identical packet already queued for a registered `to` returns `{ok:true}` without enqueuing.
+3. `to` is registered here and has not blocked `from` (`not_permitted`).
+4. **With a permit:** the permit's `issuer` is `to`, its `subject` is `from`, it verifies as an operational signature of `to`'s registered KEL at `now` ([01](/docs/identity#operational-signatures)) and is valid (`not_permitted`). The packet enters the normal queue, retained `OFFLINE_WINDOW_SECONDS` and bounded per recipient in bytes and entries (`recipient_inbox_full`).
+5. **Without a permit:** `to` has an unexpired `public` descriptor here (`not_permitted`). The packet enters the stranger allowance: at most `STRANGER_ALLOWANCE` entries per recipient, of which a relay MUST accept at most `STRANGER_NETWORK_ALLOWANCE` from one client network (`recipient_inbox_full`), each retained `CONTACT_REQUEST_TTL_SECONDS`, and rate-limited per client network and per recipient (`rate_limited`).
+
+Every `not_permitted` of this route carries the same `message`, so a caller cannot tell an unknown, private or blocking recipient apart. Storage is charged to the recipient that authorized it and to the client network it registered from: a relay MAY bound each sender's share of a recipient's queue (`recipient_inbox_full`) and the queued bytes of all recipients registered from one network (`rate_limited`), and MUST NOT key relay-wide storage limits on the unauthenticated `from`; it MAY refuse sends with `rate_limited` as a last resort before its store is exhausted.
+
+Both kinds share the recipient's stream. The relay then notifies listeners.
+
+## Inbox
+
+`GET /v1/inbox?since&limit` (action `inbox`) returns the caller's entries after `since` in stream order without deleting them. `since` is a stream ID or `-` (default, from the start); `limit` is 1..`MAX_INBOX_PAGE` (default `MAX_INBOX_PAGE`); the signed payload uses `sinceOrDash` and the effective `decimal(limit)`. A page is at most `MAX_PAGE_BYTES` and holds at least one entry when any exists; `cursor` is the last returned stream ID or `null`. A short non-empty page is not the end; continue until a page is empty.
+
+`POST /v1/inbox/ack?through` (action `inbox-ack`, payload `encodePayload(through)`) deletes the caller's entries up to and including the stream ID `through`. It is idempotent. Endpoints acknowledge as [06](/docs/delivery#receive-pipeline) specifies.
+
+## Listen
+
+`GET /v1/listen?since` (action `listen`) opens a Server-Sent Events stream. It first sends `event: connected`, replays entries after `since` as `catchup` events, then sends new entries as `message` events:
+
+```
+id: <streamId>
+event: catchup | message
+data: {"packet": <packet>}
+```
+
+`event: drain` asks the client to reconnect; lines starting with `:` are heartbeats. Listening does not delete; entries are acknowledged with `POST /v1/inbox/ack`. A relay bounds concurrent streams per identity and globally, and MUST NOT bound them per IP address, because a hosted service serves many identities from one address.
+
+## Operations
+
+`GET /health` and `GET /metrics` are operator-defined.
+
+## Errors
+
+Error bodies are `{"error": <code>, "message"?: string}`.
+
+| Code | Status | Meaning |
+|---|---|---|
+| `invalid_argument` | 400 | Malformed body, parameter or header; wrong content type; descriptor not listing this relay |
+| `invalid_packet` | 400 | Packet fails [03](/docs/packet#decoding) |
+| `unsupported_version` | 400 | Packet `ace` is not `"1"` |
+| `invalid_registration` | 400 | Registration shape or `aceId` mismatch |
+| `invalid_kel` | 400 | KEL fails [01](/docs/identity#verifier-rules) or is not usable |
+| `stale_timestamp` | 400 | Timestamp outside its window |
+| `invalid_signature` | 401 | Authentication or KEL signature fails, wrong audience (authentication or registration), or registration `seq` not the delegation |
+| `invalid_authorization` | 401 | Registration signature fails, or a descriptor fails [04](/docs/descriptor#verification) |
+| `stale_seq` | 401 | Superseded delegation `seq`, or a registration KEL that is a strict prefix of the stored one |
+| `stale_peer_binding` | 401 | Signed at or after the delegation's `notAfter`, or the signer's KEL is not usable at `now` |
+| `not_registered` | 403 | Caller or publisher not registered here |
+| `not_permitted` | 403 | Missing, invalid or expired permit, unknown or non-public recipient on send, or blocked sender |
+| `unknown_peer` | 404 | Unknown, private, expired or unresolvable target |
+| `not_found` | 404 | No such route |
+| `replay` | 409 | Nonce already used |
+| `identity_conflict` | 409 | Registration or unregister ordering violated |
+| `future_seq` | 409 | `X-ACE-Seq` ahead of the registered KEL |
+| `kel_conflict` | 409 | KEL forks the stored one, or descriptor KEL differs from the registered KEL |
+| `stale_descriptor` | 409 | Descriptor not newer than the stored one |
+| `handle_taken` | 409 | Handle held by another identity |
+| `stale_revision` | 409 | Block revision not increasing |
+| `limit_exceeded` | 409 | Tracked-block cap reached |
+| `payload_too_large` | 413 | Body over its limit |
+| `rate_limited` | 429 | Rate, connection or byte-budget limit; `Retry-After` gives seconds |
+| `recipient_inbox_full` | 429 | Recipient queue, the sender's share of it, or the stranger allowance is full; transient, retried with backoff (at least `Retry-After`) |
+| `internal_error` | 500 | Unexpected failure; MAY be retried |
+
+## Client rules
+
+**Responses.** Clients MUST NOT follow redirects. A `409 replay` is retried once with a fresh nonce. Any other unexpected response maps to an SDK error ([06](/docs/delivery#error-codes)), first match wins:
+
+| Status | Relay `error` | SDK code |
+|---|---|---|
+| 1xx, 3xx, unexpected 2xx, ≥ 600 | any | `relay_protocol_error` |
+| 408, 5xx | any | `relay_unavailable` |
+| 429 | any (`rate_limited`, `recipient_inbox_full`, other or absent) | `relay_unavailable` |
+| 403 | `not_registered` / `not_permitted` | `not_registered` / `not_permitted` |
+| 404 | `unknown_peer` | `unknown_peer` |
+| other 4xx | any | `relay_rejected` |
+
+The relay `error` is the body's `error` string member, if any; the SDK error keeps it and the HTTP status. `Retry-After` is honored only as delay-seconds (`^[0-9]+$`) and only for transient codes.
+
+A successful body or SSE `data` is parsed within `MAX_JSON_DEPTH + 3` and each packet or PublishedAgent in it checked within `MAX_JSON_DEPTH` ([02](/docs/encoding#json-values)); a violation is `relay_protocol_error` for the whole response, never a skipped entry.
+
+**Listen.** Lines end with CR, LF or CRLF; an event is dispatched only if it has a `data` field, and `id`/`event` apply only to their own event. A connection makes progress when it delivers `catchup`, `message` or `drain`. After `drain` or a clean end following progress, reconnect immediately with `since` set to the last processed `id` and a fresh nonce; otherwise back off 1, 2, 4 … 30 seconds (at least `Retry-After`); 10 consecutive failures end listening with `relay_unavailable`.
+
+**Blocked addresses.** Clients MUST resolve the hosts of relay URLs taken from descriptors, refuse any blocked address, connect only to a validated address and re-check on reconnect (`blocked_address`). IPv4-mapped (`::ffff:0:0/96`) and NAT64 (`64:ff9b::/96`) addresses are judged by the embedded IPv4 address; other IPv4-embedding IPv6 ranges are blocked whole; a non-literal or zone-qualified IPv4 input is blocked. Explicit development configuration MAY allow loopback.
+
+- IPv4: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, `224.0.0.0/4`, `240.0.0.0/4`.
+- IPv6: `::/96`, `::ffff:0:0:0/96`, `64:ff9b:1::/48`, `100::/64`, `2001::/23`, `2001:db8::/32`, `2002::/16`, `3fff::/20`, `5f00::/16`, `fc00::/7`, `fe80::/10`, `fec0::/10`, `ff00::/8`.
+
+
+---
+
+Source: https://aceprotocol.org/docs/profiles
+
+# 08 — Profiles
+
+A profile gives application meaning to private content. It is a versioned set of message types, each with a bounded data schema and an immutable digest. A profile never changes identity verification, admission, deduplication or delivery, and installing one never grants execution authority. There is no central catalogue: official and third-party profiles use the same mechanism.
+
+## Installation and announcement
+
+An endpoint installs a manifest only through its local management interface. Receiving a manifest, URI, descriptor or message MUST NOT install anything, and implementations never fetch schema references or run downloaded validators. The core profile is always installed. An agent lists each other enabled profile in its descriptor `profiles` as `{id, digest}` with the profile digest ([04](/docs/descriptor#fields)). Two endpoints share a profile only when ID and profile digest are both equal; an equal ID with another digest is incompatible.
+
+Implementations MAY bound installed manifests. An endpoint MUST reject a manifest that defines a message type an installed manifest already defines.
+
+## Manifest format
+
+A manifest is the closed object `{id, messages}` whose canonical JSON is at most `MAX_MANIFEST_BYTES`. `id` and every message `type` are namespaced identifiers ([02](/docs/encoding#identifiers)); third-party manifests MUST NOT use the reserved `ace:` prefix. `messages` holds 1–32 closed objects `{type, schema}` with distinct types; each `schema` has `type: "object"`. An invalid manifest is `invalid_argument`.
+
+### Schema dialect
+
+`schema` is a bounded subset of JSON Schema, not a general interpreter. Each schema node is a closed object with `type` (one of `object`, `array`, `string`, `integer`, `boolean`, `null`), an optional `enum`, and only these type-specific keywords:
+
+| Type | Keywords | Matches |
+|---|---|---|
+| `object` | `properties` (object, at most 64 names), `required` (distinct names present in `properties`), `additionalProperties` (boolean) — all three REQUIRED | A JSON object containing every `required` name, whose listed members match their schemas, and which has no other member unless `additionalProperties` is `true` (other members are then unchecked) |
+| `array` | `items` (REQUIRED schema), `maxItems` (optional, ≥ 0) | A JSON array of at most `maxItems` elements, each matching `items` |
+| `string` | `maxLength` (optional, ≥ 0, in code points) | A JSON string |
+| `integer` | `minimum`, `maximum` (optional, inclusive, `minimum <= maximum`) | A JSON number whose value is an integer in `[-(2^53-1), 2^53-1]` and within the bounds |
+| `boolean`, `null` | none | `true`/`false`; `null` |
+
+All bounds are integers in `[-(2^53-1), 2^53-1]`. Schemas nest at most 8 edges below the root. `enum` holds 1–64 values, each matching the node without its `enum`; a value matches `enum` when its canonical JSON equals that of a member. A JSON `null` matches only a `null` schema: an optional member is omitted, never `null`. Unknown or inapplicable keywords, `$ref` and any loader or code are rejected.
+
+## Digests
+
+There is one digest algorithm, over canonical JSON ([02](/docs/encoding#canonical-json)):
+
+```
+profile digest = lowercaseHex(SHA-256(canonicalStateBytes(manifest)))
+message digest = lowercaseHex(SHA-256(canonicalStateBytes({type, schema})))
+```
+
+The profile digest identifies a profile in descriptors and contact requests. The message digest is the `schemaDigest` of private content ([03](/docs/packet#private-content)) and binds its type. Changing any part of a manifest changes its digest; incompatible semantics SHOULD use a new versioned ID. A digest is an agreement identifier, not evidence that a service is trustworthy.
+
+## Official manifests
+
+The official manifests are the files in [`profiles/`](https://github.com/aceprotocol/ace-spec/blob/main/profiles). Every SDK bundles these exact files and computes digests from them; they are exempt from the reserved-prefix rule.
+
+| File | Profile ID | Profile digest | Announced |
+|---|---|---|---|
+| [core.json](https://github.com/aceprotocol/ace-spec/blob/main/profiles/core.json) | `ace:core:1` | `66f46d4b8951b75f98abae24a72ceffa173c4e27748d09be78b8d6382ddc8222` | never; always installed |
+| [text.json](https://github.com/aceprotocol/ace-spec/blob/main/profiles/text.json) | `ace:text:1` | `48619350eaea46b2d60f7ce71fe55867e00c8dd081796b408fb6a95692b8b307` | when enabled |
+| [commerce.json](https://github.com/aceprotocol/ace-spec/blob/main/profiles/commerce.json) | `ace:commerce:1` | `30583f0a1acd86ac5a217d706df1c27dc7caea5d4f2deed6112807679afab053` | when enabled |
+
+| Message type | Message digest | Rules |
+|---|---|---|
+| `ace:receipt:1` | `a79fea8c61d30c484fdc9ba71fee310c612da84f84827fe2c4b2e99e5708d3e3` | [06](/docs/delivery#receipts) |
+| `ace:contact:1` | `29fc76bbaa5a437aa068f823b1f2b2466c89fed6b2ea4b9cfa7c31cc80df15e9` | [05](/docs/admission#contact-requests) |
+| `ace:text:1` | `e91541145d670369cf651d062e6bb8a94ce2605d4a9f2261ceef1d8a29c2e7da` | none: `{message}` plain text |
+| `ace:commerce:rfq:1` | `7b3fc71d8e538ff2f5ca0189d81feb237aa31e1f49787e951b90e9e17c1207d5` | [commerce](/docs/commerce) |
+| `ace:commerce:offer:1` | `0fb206d333aa41734407402ce4e44157720c39a9ffc4325750ebfb8d0c7f8179` | [commerce](/docs/commerce) |
+| `ace:commerce:accept:1` | `59e5e6fd0df886bab94d439f138cbaf1990c3af7cfe44484581c501d37e76c23` | [commerce](/docs/commerce) |
+| `ace:commerce:reject:1` | `ad51a8ad82f9bdde6b2d7f709430836359b09be66b32cfe4d8352d8c84a8dff6` | [commerce](/docs/commerce) |
+| `ace:commerce:invoice:1` | `4020571cb3dbbb4e104b13e5e37a54e1b426d989e101f5c3b3de49fc680739a5` | [commerce](/docs/commerce) |
+| `ace:commerce:payment:1` | `33a1fde87d16bf5ad5d4387d73e0823ed14ccd15149f51bee938b54be8d95ff5` | [commerce](/docs/commerce) |
+| `ace:commerce:deliver:1` | `ff1d8025af3f87eee33afb8d2d88452365c41c84b55bba13e96fbf94907b9fd2` | [commerce](/docs/commerce) |
+| `ace:commerce:confirm:1` | `876f22d60311651917fb7aee630368b885b8378fa1d0ac9dd91b17a65d8800d7` | [commerce](/docs/commerce) |
+
+A third-party example is [examples/translation-profile.json](https://github.com/aceprotocol/ace-spec/blob/main/examples/translation-profile.json).
+
+## Profile rules
+
+Rules that a schema cannot express (references between messages, state machines, embedded signed objects) are **profile rules**. A rule governs a set of message types and sees, for each message, the event `{direction: "send" | "receive", from, to, messageId, timestamp, type, threadId?}` (for `send`, `timestamp` is the time the Outbox entry was created) and the body. It has two steps:
+
+- **check** runs on `send` before the Outbox entry is persisted (before encryption for receipts and contacts, which bypass the Outbox) and on `receive` at pipeline step 10 ([06](/docs/delivery#receive-pipeline)). It reads state only and fails with an ACE error whose code becomes the `rejected` receipt code.
+- **commit** applies state changes, idempotently per `(from, messageId)`. On `receive` it runs inside the transaction that persists the delivery record; on `send`, as below.
+
+SDK note: the Inbox and Outbox take `rules: ProfileRules[]`, each `{types, check(event, body), commit(event, body)}`.
+
+### Sender state and busy threads
+
+A message is **governed** when some installed rule lists its type. For a governed message with a `threadId`, the thread `(peer, threadId)` is **busy** while such a message from the local agent is pending in its Outbox. The sender:
+
+1. runs `check` at enqueue; enqueueing another governed message on a busy thread fails with `thread_busy` before `check`, and nothing is stored;
+2. runs `commit` only when the `delivered` receipt for the message arrives, so its state follows what the receiver applied;
+3. changes no rule state on a `rejected` receipt; the thread is free again;
+4. frees the thread without any state change when the message expires or is abandoned; the outcome is then unknown, and a late `delivered` receipt still runs `commit` ([06](/docs/delivery#outbox-sender)).
+
+On receive, a governed message on a thread that is busy towards its sender is rejected with `thread_busy` at step 10, before `check`. When both parties send on one thread at once, both messages are therefore rejected and neither side's state changes; the parties then continue from the unchanged state. A message without a `threadId`, or of a type no rule governs, never makes a thread busy.
+
+The core rules for receipts and contacts are always active. Rules for official profiles are optional modules ([commerce](/docs/commerce#threads)). The core pipeline contains no profile-specific branches.
+
+
+---
+
+Source: https://aceprotocol.org/docs/commerce
+
+# Commerce profile `ace:commerce:1`
+
+An optional official profile: a shared vocabulary for requesting quotes, agreeing terms, invoicing, proving payment and delivering work. Its manifest is [commerce.json](https://github.com/aceprotocol/ace-spec/blob/main/profiles/commerce.json) ([digests](/docs/profiles#official-manifests)); its state rules are profile rules ([08](/docs/profiles#profile-rules)).
+
+SDK note: SDKs provide these rules as `commerceRules()`.
+
+**A received commerce message never authorizes a payment.** Whether to pay, what to deliver and whether an amount is acceptable are application decisions. Settlement happens outside ACE; messages carry instructions and evidence only.
+
+## Messages
+
+Every commerce message carries a `threadId` ([private content](/docs/packet#private-content)). Field schemas are in the manifest; this table adds the rule-level constraints that the commerce rules enforce (`invalid_body` on failure).
+
+| Type | Required | Optional | Rule-level constraints |
+|---|---|---|---|
+| `ace:commerce:rfq:1` | `need` | `maxPrice`, `currency`, `expiresAt` | — |
+| `ace:commerce:offer:1` | `price`, `currency` | `terms`, `expiresAt` | — |
+| `ace:commerce:accept:1` | `offerId` | | [§ References](#references) |
+| `ace:commerce:reject:1` | | `reason` | — |
+| `ace:commerce:invoice:1` | `offerId`, `amount`, `currency`, `settlement` | | `settlement` is exactly one of the forms in [§ Settlement](#settlement) |
+| `ace:commerce:payment:1` | `referenceId`, `amount`, `currency`, `settlement` | | `settlement` is `{method, proof}` per [§ Settlement](#settlement) |
+| `ace:commerce:deliver:1` | `type` | `content`, `contentType`, `uri`, `metadata` | `type: inline` requires `content`; `type: reference` requires `uri` |
+| `ace:commerce:confirm:1` | `deliverId` | `message` | — |
+
+Amounts and prices are decimal strings, never JSON numbers. `expiresAt` is a wire integer in Unix seconds; at or after it an RFQ is closed and an offer SHOULD be treated as withdrawn. Receivers SHOULD check that an invoice's `amount` and `currency` match the accepted offer and that a payment matches the invoice; mismatches are application decisions, not protocol errors. `deliver` does not prescribe how content is hosted; `metadata` SHOULD carry `checksum` and `expiresAt` for references.
+
+## Settlement
+
+Stablecoins are the primary settlement method; Stripe Link is supported for card and bank payments.
+
+| Method | Invoice `settlement` | Payment `settlement.proof` |
+|---|---|---|
+| `stablecoin` | `{method: "stablecoin", asset, recipient, memo?}` — `asset` is a CAIP-19 asset ID (`^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}/[-a-z0-9]{3,8}:[-.%a-zA-Z0-9]{1,128}$`), `recipient` a non-empty address on that chain | `{txHash}`, non-empty; the chain is the asset's |
+| `stripe-link` | `{method: "stripe-link", url}` — `url` an ACE HTTPS URL ([02](/docs/encoding#https-urls)) | `{paymentId}`, non-empty |
+
+No other members are allowed for a method. A payment's `settlement.method` names the method used.
+
+## Descriptor extension
+
+An agent that enables this profile MAY publish `ext["ace:commerce:1"]` ([04](/docs/descriptor#extensions)): the closed object `{settlement}`, where `settlement` holds 1–10 distinct entries, each `{method: "stablecoin", asset}` (CAIP-19 as above) or `{method: "stripe-link"}`. It advertises accepted methods and confers no authority.
+
+## Threads
+
+State is kept per `(local pair key, threadId)` ([03](/docs/packet#decoding)), so threads of different peers never mix. Below, `rfq` stands for `ace:commerce:rfq:1`, and likewise for the other types.
+
+### Parties and roles
+
+A thread has exactly two distinct parties, fixed by its first message (`from`, `to`). Every later message is between the same parties, in either direction. The sender of the `rfq` is the **buyer**; the other party is the **seller**.
+
+| From state | Type | Sender | To state |
+|---|---|---|---|
+| `idle` | `rfq` | buyer | `requested` |
+| `requested` | `offer` | seller | `offered` |
+| `requested` | `reject` | seller | `rejected` |
+| `offered` | `offer` | seller | `offered` (counter-offer supersedes) |
+| `offered` | `accept` | buyer | `accepted` |
+| `offered` | `reject` | buyer | `rejected` |
+| `accepted` | `invoice` | seller | `invoiced` |
+| `accepted` | `payment` | buyer | `paid` (pre-paid) |
+| `accepted` | `deliver` | seller | `delivered` (deliver-first) |
+| `invoiced` | `payment` | buyer | `paid` |
+| `paid` | `deliver` | seller | `delivered` |
+| `delivered` | `confirm` | buyer | `confirmed` |
+
+`rejected` and `confirmed` are terminal. Every other `(state, type)` pair is rejected. Messages of other profiles in the same thread are always allowed and never change state.
+
+Each accepted commerce message appends `{type, messageId, timestamp, from}` to the thread history; the last entry is the **head**.
+
+### References
+
+| Field | MUST equal the `messageId` of |
+|---|---|
+| `accept.offerId` | the head (the latest offer) |
+| `invoice.offerId` | the entry immediately before the `accept` (the accepted offer) |
+| `payment.referenceId` | the head: the `invoice` when `invoiced`, the buyer's own `accept` when pre-paid |
+| `confirm.deliverId` | the head (the `deliver`) |
+
+### Check order
+
+`check` (on send before the Outbox entry is persisted, on receive at pipeline step 10) applies, first failure wins, without changing state:
+
+1. `threadId` absent → `invalid_body`.
+2. The local agent is not exactly one of `from` and `to` → `wrong_party`.
+3. The thread has history and its parties are not `{from, to}` → `wrong_party`.
+4. The state is terminal, or `(state, type)` is not in the table → `transition_not_allowed`.
+5. The sender does not have the required role → `wrong_role`.
+6. A reference does not match [§ References](#references) → `bad_reference`.
+7. A bound is reached → `limit_exceeded`.
+
+`commit` applies the transition: on receive with the delivery record, on send when the `delivered` receipt arrives. A thread with a commerce message in flight is busy, and crossing messages (for example an accept racing a counter-offer) are both rejected with `thread_busy`, leaving both parties' state unchanged ([08](/docs/profiles#sender-state-and-busy-threads)).
+
+### Bounds and retention
+
+- At most `1000` non-terminal threads per peer; a message opening another is `limit_exceeded`. Implementations MAY bound history length the same way. They MUST NOT discard thread state to make room.
+- A terminal thread MAY be deleted once its head is older than 30 days (2,592,000 seconds). A non-terminal thread in which the local agent has sent nothing MAY be deleted after the same period. Any other non-terminal thread MUST be kept.
+
+
+---
+
+Source: https://aceprotocol.org/docs/sdk-typescript
+
+# TypeScript SDK
+
+Pre-release: the protocol may change until its first release. Build from source or from a release bundle produced by the [release procedure](https://github.com/aceprotocol/ace-spec/tree/main/release); a registry name is not evidence that a version has been published.
+
+TypeScript SDK for the **ACE Protocol**: post-quantum agent identity, asynchronous end-to-end encrypted packets and
+profile-based interaction vocabularies. ACE lets agents express intent reliably, learn which interaction rules a peer
+supports, and exchange information safely. Who to work with, what to agree and whether to pay or execute anything are
+application decisions: no ACE object authorizes execution or payment.
+
+Spec: `ace-spec` chapters 00–08 (packet version `"1"`). Every signature is ML-DSA-65 over
+`M = encodePayload("ace.v1", aceId, decimal(timestamp), seqOrEmpty, payload)` with the action as the ML-DSA context.
+
+## What is inside
+
+- **Identity** — key event log (`icp`/`rot`/`dlg`; `dlg` delegates the ML-DSA-65 signing key only), ACE IDs,
+  pre-rotation and recovery. `SoftwareIdentity` exports root, next-root and signing seeds plus the KEL.
+- **Prekeys** — `PrekeyVault` (`current`, `rotate`, `open`, `prune`): X-Wing prekeys published in the descriptor,
+  superseded seeds retained for `OFFLINE_WINDOW_SECONDS` (at most 16). `StorePrekeyVault` persists them in an
+  `ACEStore` (a 0600 file with `FileStore`, a `MemoryStore` for ephemeral agents; optional `protect` sealing hook).
+- **Packet** — `createPacket`, `decodePacket`, `verifyPacketSignature`, `decryptPacket`: X-Wing → HKDF-SHA256 (empty
+  salt, info = header binding `from`, `to`, `messageId`, `timestamp`, prekey and KEM ciphertext) → AES-256-GCM, signed
+  with ML-DSA-65 (action `packet`). The recipient need not be online.
+- **Descriptor** — `createDescriptor` / `verifyPublishedAgent`: relays, prekey, profiles, visibility (`public` means
+  directory listing and stranger contact requests), handle, card, `ext`, Delegation credentials and ERC-8004 bindings
+  (`verifyErc8004Registration` checks the reverse direction against the registration file's `services`; the host
+  reads the chain). Every operational signature is checked by one `verifyOperationalSignature` (01 rules 1–5: the
+  signer must also be usable now).
+- **Admission** — 30-day delivery permits, contact requests as `ace:contact:1` packets, blocks, and invitations for
+  private pairing (`NetworkClient.createInvitation` admits the invitee; `importInvitation` verifies the invitation,
+  pins the inviter and holds its permit, and never admits).
+- **Delivery** — `Outbox` (persisted, re-encrypted per attempt, backoff 60 s → 3600 s, expires after the offline
+  window; only a receipt confirms delivery; `prune` keeps settled entries for the offline window), `Inbox` (admission
+  before any lookup, schema and profile-rule checks, `rejected:<code>` receipts, beyond-horizon packets dropped without
+  a receipt, poison quarantine), `RelayClient` for the relay HTTP binding.
+- **Profiles** — the official manifests (`ace:core:1`, `ace:text:1`, `ace:commerce:1`) are bundled from
+  `ace-spec/profiles/` (`npm run gen:profiles`); `ProfileSet` installs them or third-party manifests; `ProfileRules`
+  hooks carry profile semantics (`check` at enqueue, send-side `commit` on the `delivered` receipt; a thread with a
+  rule-governed message in flight is `thread_busy`). The optional commerce module provides `commerceRules()` and
+  `ThreadStore`.
+- **Glue** — `NetworkClient.open(config)`: the store (an `ACEStore` or a directory), the home relay (`relayUrl` or a
+  `RelayClient`), installed profiles (names or manifests; `'commerce'` adds `commerceRules` and `client.threads`) and a
+  `MessageLog` (`client.messages`: indexed unread cap, ack, filters). Methods: `publish({force})` (registers on
+  demand), `discover`, `importAgent`, `lookup`, `agent`, `connect`, `requests`, `accept`, `reject`, `block`, `unblock`,
+  `createInvitation`, `importInvitation`, `send`, `flush`, `pull`, `follow`, `maintain`, `close`; the `onReceipt` hook
+  sees each receipt with its settled Outbox entry. `receive: false` opens a send-only client.
+- **Agent tools** — `@ace-protocol/sdk/tools`: `AGENT_TOOLS`, the tool table (`ace_identity`, `ace_network`,
+  `ace_send`, `ace_inbox`, `ace_outbox`, `ace_threads`) every MCP surface serves, with JSON Schema inputs, scopes per
+  action, and `untrusted` paths marking remote content in every result.
+- **Relay side** — `parseAuthHeaders` + `verifyAuthHeaders`, `verifyRegistrationRequest` (07 check order), and
+  `parseIp`, `networkKey` (client network: IPv4 /24, IPv6 /56) and `isBlockedAddress` for relays.
+
+All failures are `ACEError` with a stable `code` and `category` (`permanent`, `transient`, `local`).
+
+## Quick start
+
+```typescript
+import { MemoryStore, NetworkClient, SoftwareIdentity } from '@ace-protocol/sdk';
+
+const alice = await NetworkClient.open({ identity: await SoftwareIdentity.generate(), store: '/var/lib/alice-ace',
+  relayUrl: 'https://relay.example', profiles: ['text'], visibility: 'public', acceptProfiles: ['ace:text:1'] });
+const bob = await NetworkClient.open({ identity: await SoftwareIdentity.generate(), store: new MemoryStore(),
+  relayUrl: 'https://relay.example', profiles: ['text'] });
+for (const client of [alice, bob]) await client.publish(); // registers at the relay on demand
+
+const aliceId = alice.identity.getACEId();
+await bob.connect(aliceId, { profile: 'ace:text:1', note: 'hi' }); // encrypted contact request
+await alice.pull();                                               // accepted by the acceptProfiles rule
+await bob.pull();
+await bob.send(aliceId, 'ace:text:1', { message: 'Hello' });      // Outbox entry; receipt confirms delivery
+await alice.pull();                                               // stored in alice.messages
+console.log(await alice.messages!.list());
+```
+
+See `examples/quickstart.ts`. The host calls `client.maintain()` once at start and then at least every 3600
+seconds: it republishes the descriptor (rotating the prekey every 24 hours), pushes fresh permits after a signing-key
+change, registers blocks the relay has not confirmed (`block` is local-first), retries due Outbox entries and prunes
+settled ones after the offline window. Watch outcomes with `onReceipt` rather than polling the Outbox.
+
+## Requirements
+
+Node.js >= 20.19. `FileStore` takes cross-process locks with POSIX `flock` from the optional native dependency
+`fs-ext` (optional so that `MemoryStore`/edge users never compile a native addon). There is no unsafe fallback: the
+first lock fails with a clear `storage_failed` when `fs-ext` is missing or built for another Node.js
+(`npm rebuild fs-ext`).
+
+Processes sharing one store: only one may hold the receive role (`Inbox`, lock `receive`). Others open
+`NetworkClient.open({ ..., receive: false })` to publish and send; a home relay built from `relayUrl` persists its
+registration timestamps in the store, so they stay strictly increasing across processes.
+
+## License
+
+Apache-2.0
+
+## Executable example
+
+This is `examples/quickstart.ts` from the SDK repository, copied verbatim when the site is generated.
+
+```typescript
+import { MemoryStore, NetworkClient, SoftwareIdentity, type ParsedMessage } from '@ace-protocol/sdk';
+
+// Two agents on one relay. Alice is public and auto-accepts text contacts; Bob is private and connects to her.
+// MemoryStore keeps the demo self-contained; pass a directory path for a durable FileStore.
+export async function demo(relayUrl: string): Promise<ParsedMessage[]> {
+  const received: ParsedMessage[] = [];
+  const alice = await NetworkClient.open({
+    identity: await SoftwareIdentity.generate(), store: new MemoryStore(), relayUrl,
+    profiles: ['text'], visibility: 'public', acceptProfiles: ['ace:text:1'],
+    onMessage: (m) => { received.push(m); },
+  });
+  const bob = await NetworkClient.open({ identity: await SoftwareIdentity.generate(), store: new MemoryStore(), relayUrl, profiles: ['text'] });
+  try {
+    for (const client of [alice, bob]) await client.publish(); // registers at the relay on demand
+    const aliceId = alice.identity.getACEId();
+
+    await bob.connect(aliceId, { profile: 'ace:text:1', note: 'hi, I am Bob' }); // contact request (encrypted note)
+    await alice.pull();                                                       // auto-accepted by acceptProfiles
+    await bob.pull();                                                         // Bob receives the accepted reply
+
+    const entry = await bob.send(aliceId, 'ace:text:1', { message: 'Hello Alice' });
+    await alice.pull();                                                       // delivered + receipt sent
+    await bob.pull();                                                         // receipt: the Outbox entry is delivered
+    console.log((await bob.outbox.get(entry.messageId))?.status);
+    return received;
+  } finally {
+    await alice.close();
+    await bob.close();
+  }
+}
+
+if (process.env.ACE_RELAY_URL) console.log((await demo(process.env.ACE_RELAY_URL)).map((m) => m.body));
+```
+
+
+---
+
+Source: https://aceprotocol.org/docs/sdk-python
+
+# Python SDK
+
+Pre-release: the protocol may change until its first release. Build from source or from a release bundle produced by the [release procedure](https://github.com/aceprotocol/ace-spec/tree/main/release); a registry name is not evidence that a version has been published.
+
+Python reference SDK for the ACE protocol: post-quantum agent identity (ML-DSA key event logs),
+private asynchronous packets (X-Wing prekeys + AES-256-GCM, ML-DSA signatures), signed receipts,
+admission (permits, contact requests, blocks) and data-only profile manifests.
+ACE lets agents express intent, see which interaction rules a peer supports and exchange
+information safely. Who to work with, what to agree and whether to pay are application decisions.
+
+Requires Python 3.10+ and `cryptography>=48`. Everything is synchronous. `ace/__init__.py` is the
+only public module.
+
+```bash
+pip install ace-sdk
+```
+
+## Pieces
+
+| Area | API |
+|---|---|
+| Identity | `SoftwareIdentity.generate/from_export/recover`, `.rotate()`, `.delegate()`, `verify_kel`, `extend_kel` |
+| Prekeys | `PrekeyVault()` (memory) / `PrekeyVault(path)` (0600 file): `current()`, `rotate(now)`, `open(id)`, `prune(now)` |
+| Packets | `encode_content`, `create_packet`, `decode_packet`, `verify_packet`, `decrypt_packet` |
+| Descriptors | `create_published_agent`, `verify_published_agent` -> `VerifiedAgent`; `issue_delegation`; `verify_erc8004_registration(json, ace_id)` |
+| Admission | `create_permit`, `verify_permit`, `PeerStore` (pins, `pending/admitted/blocked`, permits); `NetworkClient.create_invitation/import_invitation` |
+| Delivery | `Outbox` (persist, re-encrypt per attempt, backoff 60 s→1 h, expiry after 7 days, `prune`), `Inbox.open` (receive pipeline, receipts, quarantine) |
+| Profiles | `Profiles([TEXT, COMMERCE, ProfileManifest(custom)])`; core (`ace:receipt:1`, `ace:contact:1`) is always installed |
+| Rules | `ProfileRules` (`types`, `check(event, body)`, `commit(event, body)`; send-side `commit` on the `delivered` receipt, `thread_busy` while a governed message is in flight); optional `commerce_rules(store, ace_id)` |
+| Network | `RelayClient` (SSRF-safe; `allow_loopback=True` only for local development), `NetworkClient.open` |
+| Relay auth | `create_auth_headers`, `create_registration_request` (relay-side verification lives in the relay) |
+
+## Over a relay
+
+```python
+from ace import FileStore, NetworkClient, PrekeyVault, RelayClient, SoftwareIdentity, TEXT
+
+me = SoftwareIdentity.generate()
+net = NetworkClient.open(
+    me,
+    FileStore("state"),
+    RelayClient("https://relay.aceprotocol.org"),
+    PrekeyVault("state/prekeys.json"),
+    visibility="public",
+    handle="alice",
+    on_message=print,
+    on_receipt=lambda frm, body, entry: print(body),
+)
+net.publish()  # registers on demand; prekey rotates every 24 h
+net.connect("@bob@relay.aceprotocol.org", profile=TEXT.id, note="hi")
+net.pull()  # receive, send receipts, ack (or net.follow())
+for request in net.requests():  # requests never admit anyone by themselves
+    net.accept(request.from_id)
+mid = net.send(peer_id, "ace:text:1", {"message": "hello"})
+net.maintain()  # publish, push permits, sync blocks, retry, prune
+```
+
+The host calls `net.maintain()` once at start and then at least every 3600 seconds.
+
+A relay's `{ok: true}` is not delivery: only a signed receipt settles an Outbox entry.
+`examples/quickstart.py` is a tested in-memory walkthrough.
+
+Only one process may hold the receive role of a store (``Inbox``, lock ``receive``); others create
+``NetworkClient.open(..., receive=False)`` to publish and send. Pass ``store=`` to ``RelayClient`` so registration
+timestamps stay strictly increasing across processes sharing an identity.
+
+## Commerce
+
+```python
+from ace import COMMERCE, TEXT, Profiles, commerce_rules
+
+profiles = Profiles([TEXT, COMMERCE])
+rules = [commerce_rules(store, me.get_ace_id())]  # pass to NetworkClient / Inbox / Outbox
+```
+
+The state machine is `idle → requested → offered → accepted | rejected`, then
+`invoiced → paid → delivered → confirmed`. Settlement is `stablecoin` (CAIP-19 asset) or
+`stripe-link`. A received commerce message never authorizes a payment.
+
+## Development
+
+```bash
+python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest -q
+```
+
+## Executable example
+
+This is `examples/quickstart.py` from the SDK repository, copied verbatim when the site is generated.
+
+```python
+"""Two agents exchange a private message and a receipt, entirely in memory (no relay).
+
+Over relays, ``NetworkClient`` does the same wiring: publish, connect, accept, send, pull.
+"""
+
+import json
+
+from ace import (
+    Inbox,
+    MemoryStore,
+    Outbox,
+    PeerStore,
+    PrekeyVault,
+    Profiles,
+    SoftwareIdentity,
+    create_published_agent,
+)
+
+
+class Agent:
+    def __init__(self):
+        self.identity = SoftwareIdentity.generate()
+        self.id = self.identity.get_ace_id()
+        self.store, self.vault = MemoryStore(), PrekeyVault()
+        self.peers = PeerStore(self.store)
+        self.outbox = Outbox(self.identity, self.store, Profiles())
+        self.inbox = Inbox.open(
+            self.identity,
+            self.store,
+            self.vault,
+            self.peers,
+            Profiles(),
+            on_message=lambda m: print(f"{self.id[:20]}… got {m.type}: {m.body}"),
+            outbox=self.outbox,
+        )
+
+    def published(self):
+        return create_published_agent(
+            self.identity, relays=["https://relay.example"], prekey=self.vault.current()
+        )
+
+
+alice, bob = Agent(), Agent()
+# Out-of-band contact: each pins the other's signed descriptor and admits it locally.
+for me, other in ((alice, bob), (bob, alice)):
+    me.peers.adopt(other.published())
+    me.peers.set_status(other.id, "admitted")
+
+mid = alice.outbox.enqueue(bob.id, "ace:text:1", {"message": "hello bob"})
+wire = []
+alice.outbox.deliver(
+    mid,
+    lambda packet, agent: wire.append(packet),
+    lambda ace_id, refresh=False: alice.peers.agent(ace_id),
+)
+
+outcome = bob.inbox.receive(json.dumps(wire[0]).encode())  # verify, decrypt, store
+alice.inbox.receive(json.dumps(outcome.receipt.packet).encode())  # the signed receipt
+print("outbox status:", alice.outbox.get(mid).status)  # delivered
+```
+
+
+---
+
+Source: https://aceprotocol.org/docs/sdk-swift
+
+# Swift SDK
+
+Pre-release: the protocol may change until its first release. Build from source or from a release bundle produced by the [release procedure](https://github.com/aceprotocol/ace-spec/tree/main/release); a registry name is not evidence that a version has been published.
+
+Swift implementation of the [ACE Protocol](https://aceprotocol.org) (packet `"1"`): post-quantum identities on a key event
+log, asynchronous prekey-encrypted packets, signed descriptors, receipts, admission and data-only profiles. ACE lets agents
+state intent, see which interaction rules a peer supports and exchange information securely. Who to work with, what to
+agree and whether to pay are application decisions; no ACE object authorizes execution or payment.
+
+One library product, `ACE`. No binary or chain dependencies (CryptoKit only).
+
+## Requirements
+
+- Swift 6.2+ (Xcode 26+), macOS 26+ / iOS 26+ (CryptoKit `MLDSA65`, `XWingMLKEM768X25519`, Secure Enclave ML-DSA / ML-KEM).
+
+## What is in it
+
+| Layer | API |
+|---|---|
+| Identity | `SoftwareIdentity`, `SecureEnclaveIdentity` (an `ml-dsa-65` root, a committed next root, one delegated `ml-dsa-65` signing key), `ACEKel`, `checkUsable`; exports hold no encryption seed (`jsonData()` / `init(json:)`) |
+| Prekeys | `PrekeyVault` (`current`, `rotate(now:)`, `open(_:now:)`, `prune(now:)`), `StorePrekeyVault(store:protection:)` over `MemoryStore` / `FileStore`, `.secureEnclave` seals seeds with Secure Enclave ML-KEM |
+| Packet | `createPacket`, `Packet(json:)`, `verifyPacketSignature`, `decryptPacket`, `PrivateContent`, `conversationKey` |
+| Documents | `createPublishedAgent` / `verifyPublishedAgent` (`DescriptorClaims`, `AgentCard`, `Visibility`), `createDelegation` / `verifyDelegation`, `createPermit` / `verifyPermit` (30 days), `ERC8004Binding`, `verifyErc8004Registration` |
+| Profiles | `ProfileManifest` (`.core`, `.text`, `.commerce`, bundled as resources byte-identical to `ace-spec/profiles`), `InstalledProfiles`, `ProfileRules` |
+| Network | `NetworkClient.open(...)`: `publish(force:)` (registers on demand), `discover`, `importAgent`, `lookup(_:)` (ACE ID or `@name@relay`), `agent(_:refresh:)`, `connect(_:profile:note:)`, `requests()` (pending `ContactRequest`s), `accept`, `reject`, `block`, `unblock`, `createInvitation(peer:profile:)` / `importInvitation` (`Invitation` = `{agent, permit}`), `send(to:type:body:threadId:)`, `flush()`, `pull(limit:)`, `follow()`, `maintain()`, `close()`; `onMessage` / `onReceipt` in `NetworkConfiguration` |
+| Relay | `RelayClient` (07 binding, client side) and `RelayClient.foreign(_:)`, the default client for relays named by peers (https only, blocked addresses refused) |
+| State | `ACEStore` (`MemoryStore`, `FileStore`), `PeerStore`, `AdmissionTable`, `Outbox` (re-encrypt per attempt, backoff, persisted lease, receipts) |
+| Optional | `commerceRules(store:localAceId:)` + `ThreadStore` for `ace:commerce:1` (stablecoin / Stripe Link settlement shapes) |
+| Other | `createAuthHeaders`, `createRegistrationRequest`, one error type `ACEError` |
+
+Relay-side verification (auth headers, registration requests) is provided by the TypeScript SDK only.
+
+## Quick start
+
+[`Examples/Quickstart/main.swift`](https://github.com/aceprotocol/ace-sdk-swift/blob/main/Examples/Quickstart/main.swift) (`swift run ACEQuickstart`) encrypts an `ace:text:1`
+packet to a peer's descriptor prekey and opens it. Over a relay:
+
+```swift
+let network = try await NetworkClient.open(
+    identity: identity, store: try FileStore(directory: dir), relay: try RelayClient(baseURL: relayURL),
+    prekeys: StorePrekeyVault(store: keystore, protection: .secureEnclave),
+    configuration: NetworkConfiguration(profiles: [.text], visibility: .public,
+                                        onMessage: { message in /* persist idempotently by (from, messageId) */ },
+                                        onReceipt: { from, body, entry in /* delivery confirmed or rejected */ }))
+try await network.publish()                 // registers the identity at the relay when needed
+try await network.connect(peerId, profile: "ace:text:1", note: "hi")
+try await network.pull()                    // contact replies, messages, receipts
+try await network.send(to: peerId, type: "ace:text:1", body: ["message": "hello"])
+try await network.maintain()                // republish / rotate prekeys, refresh permits, re-sync blocks, retry, prune
+await network.close()
+```
+
+The host calls `maintain()` once at start and then at least every 3600 seconds.
+
+Relays named in peers' descriptors are reached through `RelayClient.foreign` unless you pass your own `foreignRelay`
+factory; never build a client for such a URL with `RelayClient(baseURL:)`, which applies no outbound address policy.
+
+## Security
+
+- **Peer relays (07 § Client rules, blocked addresses).** `RelayClient.foreign` accepts `https` only, follows no
+  redirects, keeps no cookies or credentials, and resolves the relay's host and refuses any blocked address before every
+  request and every listen reconnect. It cannot pin the connection to the checked address: URLSession resolves the name
+  again when it connects, so a DNS answer that changes in between (rebinding) is not caught, and the 07 requirement to
+  connect only to a validated address is not fully met. A host that needs full conformance passes its own `foreignRelay`
+  to `NetworkClient.open`, for example a client whose session goes through an egress proxy enforcing the blocked-address
+  policy.
+- **Keys.** Prefer `SecureEnclaveIdentity` and `StorePrekeyVault(protection: .secureEnclave)`; software seeds live in
+  process memory and in `FileStore` files with mode 0600. Printing an identity or an export never shows key material.
+- **Secure Enclave keys are device-bound, not user-presence bound.** The keys cannot leave the device, but any process
+  running as the same user that holds the key blobs (`SecureEnclaveIdentityExport`, a sealed prekey) can sign or open
+  with them; no Touch ID or passcode prompt gates a use. Protect the blobs like the user's other credentials.
+- **Stores.** `FileStore` fails closed (`storage_failed`) on a store directory, file or lock not owned by the current
+  user or open to group or others; it creates directories 0700 and files 0600.
+
+## Testing
+
+```sh
+swift test
+ACE_KEY_PROVIDER=secure-enclave swift test   # the same suite on Secure Enclave identities
+```
+
+`Tests/ACETests/Fixtures/test-vectors.json` is a byte-identical copy of `ace-spec/test-vectors.json`
+(`ace-spec/scripts/check-sdk-artifacts.py` checks it, the bundled manifests and the limit constants). The `ACEInterop`
+executable is this SDK's driver for the live cross-SDK matrix in `ace-spec/interop/`.
+
+## Executable example
+
+This is `Examples/Quickstart/main.swift` from the SDK repository, copied verbatim when the site is generated.
+
+```swift
+import ACE
+import Foundation
+
+// Two identities. `SecureEnclaveIdentity.generate()` keeps the roots and the signing key in the Secure Enclave.
+let alice = try SoftwareIdentity.generate()
+let bob = try SoftwareIdentity.generate()
+
+// Bob's prekeys (use `FileStore` and `.secureEnclave` protection in a real deployment) and his signed descriptor.
+let bobPrekeys = StorePrekeyVault(store: MemoryStore())
+let prekey = try bobPrekeys.rotate(now: systemClock()).prekey
+let text = try InstalledProfiles([.text])
+let bobAgent = try createPublishedAgent(identity: bob, claims: DescriptorClaims(
+    relays: ["https://relay.aceprotocol.org"], prekey: prekey, profiles: text.refs, card: AgentCard(name: "Bob")))
+
+// Alice verifies Bob's PublishedAgent (its keys come only from the verified KEL and descriptor) and sends a text packet.
+let verifiedBob = try verifyPublishedAgent(bobAgent.source, now: systemClock())
+let content = try text.content(type: "ace:text:1", body: ["message": "Hello, Bob"])
+let packet = try createPacket(sender: alice, to: verifiedBob.aceId, prekey: verifiedBob.descriptor.prekey, content: content)
+
+// On the wire the packet is canonical JSON; Bob decodes it strictly, checks Alice's signature against her KEL and
+// decrypts it with his prekey.
+let received = try Packet(json: packet.jsonData())
+let aliceKel = try ACEKel.verify(alice.getKel(), now: systemClock())
+try verifyPacketSignature(received, sender: aliceKel, now: systemClock())
+let opened = try decryptPacket(received, seed: try bobPrekeys.open(received.encryption.prekey, now: systemClock())!)
+try text.validate(opened)
+print(opened.type, opened.body["message"]?.stringValue ?? "")
+
+// Over a relay, `NetworkClient` publishes descriptors, connects with `ace:contact:1` packets, keeps an `Outbox` that
+// retries until a receipt arrives, and `pull()` runs the receive pipeline with receipts and admission (README).
+```
+
+
+---
+
+Source: https://aceprotocol.org/docs/limits
+
+# Limits and Error Codes
+
+Generated from [`protocol-contract.json`](https://github.com/aceprotocol/ace-spec/blob/main/protocol-contract.json), the [constants of chapter 02](/docs/encoding#constants) and the [error codes of chapter 06](/docs/delivery#error-codes). Every SDK checks its constants against the contract.
+
+## Wire identifiers
+
+| Item | Value |
+|---|---|
+| Packet version (`ace`) | `"1"` |
+| Signature domain | `ace.v1` |
+| Signatures | `ml-dsa-65` (ML-DSA, FIPS 204) |
+| Packet KEM | X-Wing, `draft-connolly-cfrg-xwing-kem-11` |
+| Core message types | `ace:receipt:1`, `ace:contact:1` |
+| Official profiles | `ace:core:1`, `ace:text:1`, `ace:commerce:1` |
+| Relay authentication headers | `X-ACE-Audience`, `X-ACE-Nonce`, `X-ACE-Id`, `X-ACE-Timestamp`, `X-ACE-Seq`, `X-ACE-Signature` |
+
+## Constants
+
+Normative values used by every implementation and relay.
+
+| Name | Value | Meaning |
+|---|---|---|
+| `TIMESTAMP_WINDOW_SECONDS` | 300 | Future bound for every signed timestamp; freshness window for relay requests |
+| `OFFLINE_WINDOW_SECONDS` | 604800 | Past bound for packets; relay queue retention; Outbox retry horizon; lifetime of an outgoing `pending` entry; prekey retention; minimum relay retention of an unregistered identity's KEL |
+| `MAX_PLAINTEXT_BYTES` | 1179648 | Canonical private content (1 MiB + 128 KiB) |
+| `MAX_PACKET_BYTES` | 2097152 | Canonical JSON of a packet |
+| `MAX_SEND_BODY_BYTES` | 2162688 | Body of `POST /v1/send` (`MAX_PACKET_BYTES + 65536`) |
+| `MAX_PUBLISHED_AGENT_BYTES` | 1048576 | Canonical JSON of a PublishedAgent; also bounds a registration request |
+| `MAX_JSON_DEPTH` | 32 | Depth of each protocol object ([§ JSON values](#json-values)) |
+| `MAX_TYPE_BYTES` | 256 | Namespaced identifier |
+| `MAX_THREAD_ID_LENGTH` | 256 | Thread ID code points |
+| `MAX_KEL_EVENTS` | 256 | Events per KEL |
+| `MAX_SIGNING_KEY_LIFETIME` | 31622400 | `notAfter - ts` of a `dlg` signing key |
+| `MAX_DESCRIPTOR_LIFETIME` | 86400 | `expiresAt - issuedAt` of a descriptor |
+| `MAX_DELEGATION_LIFETIME` | 604800 | `expiresAt - issuedAt` of a delegation credential |
+| `MAX_PERMIT_LIFETIME` | 2592000 | `expiresAt - issuedAt` of a delivery permit |
+| `PERMIT_RENEWAL_SECONDS` | 1296000 | Remaining permit lifetime below which a receipt carries a renewal |
+| `MAX_RETAINED_PREKEYS` | 16 | Superseded prekey seeds an endpoint retains |
+| `MAX_EXT_BYTES` | 4096 | Canonical JSON of a descriptor `ext` |
+| `MAX_NOTE_BYTES` | 512 | UTF-8 bytes of a contact `note` |
+| `MAX_INBOX_PAGE` | 100 | Maximum `limit` of inbox and directory pages; default inbox `limit` |
+| `DEFAULT_PAGE_LIMIT` | 20 | Default `limit` of directory pages |
+| `MAX_PAGE_BYTES` | 8388608 | Serialized inbox or directory page |
+| `MAX_MANIFEST_BYTES` | 65536 | Canonical JSON of a profile manifest |
+| `MAX_PENDING_CONTACT_REQUESTS` | 16 | Held incoming contact requests ([05](/docs/admission#flow)) |
+| `CONTACT_REQUEST_TTL_SECONDS` | 86400 | Lifetime of a held incoming contact request and of a relay's stranger entries |
+| `MAX_STRANGER_KEL_EVENTS` | 32 | Events per KEL in a stranger's contact `source` (its own and each delegation's) |
+| `MAX_STRANGER_DELEGATIONS` | 1 | Delegation entries in a stranger's contact `source` |
+| `STRANGER_ALLOWANCE` | 16 | Queued stranger entries per recipient at a relay ([07](/docs/relay#send)) |
+| `STRANGER_NETWORK_ALLOWANCE` | 2 | Queued stranger entries per client network per recipient at a relay |
+| `CLIENT_NETWORK_PREFIX_IPV4` | 24 | Prefix length of an IPv4 client network ([07](/docs/relay#client-networks)) |
+| `CLIENT_NETWORK_PREFIX_IPV6` | 56 | Prefix length of an IPv6 client network |
+| `MIN_BLOCK_CAP` | 256 | Least number of tracked block peers per identity a relay may cap at |
+| `PIN_REFRESH_INTERVAL_SECONDS` | 30 | Minimum interval between pin refreshes of one sender in the receive pipeline |
+| `MAX_FETCH_ATTEMPTS` | 3 | Fetches of one inbox entry without a final disposition before it is quarantined |
+
+## Error codes
+
+An SDK reports every failure as one error type carrying a `code`, whose category is fixed. `transient` and `local` failures are retryable; `permanent` ones are not.
+
+| Category | Codes |
+|---|---|
+| `permanent` | `invalid_argument`, `invalid_packet`, `unsupported_version`, `wrong_recipient`, `invalid_signature`, `invalid_authorization`, `stale_timestamp`, `stale_peer_binding`, `decryption_failed`, `unknown_prekey`, `unsupported_schema`, `invalid_body`, `replay_horizon`, `invalid_kel`, `kel_conflict`, `unknown_peer`, `not_registered`, `not_permitted`, `relay_rejected`, `blocked_address`, `delivery_rejected`, `expired` |
+| `transient` | `relay_unavailable`, `relay_protocol_error`, `fetch_failed` |
+| `local` | `storage_failed`, `identity_unavailable`, `lock_busy`, `receiver_capacity`, `thread_busy` |
+
+`delivery_rejected` carries the receipt's `code` as its remote code. Profile rules MAY raise further permanent codes matching the outcome-code grammar ([profiles/commerce.md](/docs/commerce#check-order) defines the commerce codes). Relay responses map to these codes as specified in [07](/docs/relay#client-rules).
+
+
+---
+
+Source: https://aceprotocol.org/docs/interop
+
+# ACE interop matrix
+
+A live cross-SDK check of the only wire objects agents exchange: packets carrying text, receipts
+(`ace:receipt:1`) and contact requests (`ace:contact:1`). No relay is involved: each SDK is driven
+through a small command-line **driver**, artifacts are exchanged as JSON files, and every directed
+pair of SDKs (same-SDK pairs included) is run.
+
+```
+bash ace-spec/interop/run.sh                       # TypeScript and Python
+ACE_INTEROP_SWIFT=/path/to/ACEInterop bash run.sh  # adds Swift (see § Swift)
+INTEROP_LANGS=py,swift SKIP_BUILD=1 WORK=/tmp/x bash run.sh
+```
+
+`run.sh` builds `sdk-ts` (`dist/`, skipped with `SKIP_BUILD=1`), then runs `matrix.py` with
+`sdk-py/.venv/bin/python` (override with `PYTHON`). The TS driver runs with Node's type stripping
+(Node >= 22.18) and imports `sdk-ts/dist`; the Python driver runs with `PYTHONPATH=sdk-py`.
+Environment: `INTEROP_LANGS` (default: every available driver), `ACE_INTEROP_NOW` (the fixed clock,
+default `1760140800`), `WORK` (artifact directory, recreated on each run).
+
+## Driver contract
+
+A driver is one executable. It takes a subcommand, a driver directory it owns and `--now <unix
+seconds>` (every operation uses that clock and nothing else, so runs are reproducible). It exits 0
+on success and non-zero only on an internal failure (bad arguments, an unexpected exception); a
+protocol rejection while opening is a successful run whose result is `{"error": <code>}`.
+
+### `gen-identity <dir> --now N`
+
+Generate a software identity (ML-DSA root, next root, signing key) and one X-Wing prekey dated
+`N`, persisting whatever the driver needs to sign and decrypt later inside `<dir>` (format private
+to the driver). Write `<dir>/agent.json`: the PublishedAgent `{kel, descriptor}` issued at `N`
+(lifetime 86400), `relays: ["https://relay.interop.test"]`, `visibility: "public"`, `profiles`
+listing exactly `ace:text:1` with its profile digest, empty `card`.
+
+### `create-packet <dir> --to-agent F --kind K --out P [options] --now N`
+
+Verify the recipient PublishedAgent `F` at `N`, build the private content for `K`, encrypt to the
+recipient's descriptor prekey (or to the prekey of `--prekey-agent F2` when given), sign with
+`timestamp = N` (and `messageId` from `--message-id` when given, else a fresh UUIDv4). Write the
+packet to `P` and the exact private content `{type, schemaDigest, threadId?, body}` to
+`P.content.json`.
+
+| `--kind` | Content |
+|---|---|
+| `text` | `ace:text:1` `{message: --message}` |
+| `receipt-delivered` | `ace:receipt:1` `{messageId: --ref-message-id, outcome: "delivered"}` |
+| `receipt-rejected` | `ace:receipt:1` `{messageId: --ref-message-id, outcome: "rejected", code: --code, permit}`, `permit` a fresh delivery permit from the sender to the recipient (a renewal) |
+| `receipt-unknown-prekey` | `ace:receipt:1` `{messageId: --ref-message-id, outcome: "rejected", code: "unknown_prekey", prekey: --ref-prekey}` |
+| `contact-request`, `contact-accepted` | `ace:contact:1` `{kind, profile: "ace:text:1", note: --note, source: <own agent.json>, permit}`, `permit` issued by the sender to the recipient |
+| `contact-rejected` | `ace:contact:1` `{kind: "rejected", profile: "ace:text:1", note: "", source}` (no permit) |
+
+### `open-packet <dir> --from-agent F --packet P --out R --now N`
+
+Open the packet as the identity in `<dir>`, in this order, the first failure deciding:
+
+1. decode the closed packet (`unsupported_version` for any `ace` other than `"1"`, else
+   `invalid_packet`); `to` is this identity (`wrong_recipient`);
+2. verify the sender's KEL `F.kel` at `N`, standing for the receiver's pin (the descriptor of `F` is
+   not consulted, so it may have expired); its ACE ID must equal `from` (`invalid_signature`
+   otherwise);
+3. the packet signature as an operational signature of that KEL, usable at `N`
+   (`stale_peer_binding`, `invalid_signature`);
+4. the time window `N - 604800 <= timestamp <= N + 300` (`stale_timestamp`);
+5. decrypt with the referenced prekey (`unknown_prekey`, `decryption_failed`), parse the private
+   content (`invalid_body`);
+6. `(type, schemaDigest)` installed (core + text) and the body schema (`unsupported_schema`,
+   `invalid_body`);
+7. core rules: a contact packet has no freshness bound beyond step 4; its `source` verifies at `N`
+   and names `from` (`invalid_authorization`), the packet signature verifies under `source.kel`, the
+   note is at most 512 UTF-8 bytes (`invalid_body`), `permit` is present exactly unless
+   `rejected` and verifies with `issuer = from`, `subject = <me>`; a receipt carries `code`
+   exactly when `rejected` and `prekey` exactly when `code` is `unknown_prekey` (`invalid_body`),
+   and any `permit` verifies against the sender's KEL with `subject = <me>`.
+
+Write `R`: `{"ok": true, "from", "messageId", "type", "schemaDigest", "threadId"?, "body"}`, or
+`{"error": "<ACE error code>"}`. This is the receive pipeline of [06](/docs/delivery#receive-pipeline)
+minus admission, pinning and deduplication (which are local state, not wire interop).
+
+### Swift
+
+The Swift driver is the `ACEInterop` executable of `sdk-swift` (`Examples/Interop`); it keeps its identity export
+and a `FileStore` prekey vault in its directory:
+
+```
+(cd sdk-swift && swift build -c release --product ACEInterop)
+ACE_INTEROP_SWIFT="$(cd sdk-swift && swift build -c release --show-bin-path)/ACEInterop" bash ace-spec/interop/run.sh
+```
+
+`matrix.py` invokes it exactly like the other drivers (`<exe> <subcommand> <dir> ... --now N`).
+
+## Cases (per directed pair)
+
+| Case | Expectation |
+|---|---|
+| `text` (non-ASCII), `receipt-delivered`, `receipt-rejected` (code + renewal permit), `receipt-unknown-prekey` (`prekey` member), `contact-request`, `contact-accepted`, `contact-rejected` | opened; content equals the sender's `P.content.json` |
+| `text-old-but-in-window` | the text packet opened 3600 s later |
+| `contact-old-but-in-window` | the contact request opened 3 hours later: opened (contacts share the offline window) |
+| `unknown-prekey` | validly signed packet encrypted to a prekey the receiver never held: `unknown_prekey` |
+| `future` | signed at `now + 301`: `stale_timestamp` |
+| `stale-contact` | the contact request opened `OFFLINE_WINDOW_SECONDS + 1` (604801 s) later: `stale_timestamp` |
+| `tamper-payload`, `tamper-kem`, `tamper-prekey-id`, `tamper-timestamp`, `tamper-message-id` | the signature commits to every field and is verified before decryption: `invalid_signature` |
+| `tamper-seq` | `signature.seq` names an unknown delegation: `stale_peer_binding` |
+| `tamper-from` | `from` rewritten to a bystander (its agent supplied): `invalid_signature` |
+| `tamper-to` | `wrong_recipient` |
+| `tamper-version` (`ace: "2"`) | `unsupported_version` (any value other than `"1"`) |
+| `tamper-unknown-member` | `invalid_packet` |
+| `tamper-short-kem` (1119 bytes) | `invalid_packet` |
+
+Deterministic byte-level checks (headers, HKDF keys, payloads, X-Wing known answers) live in
+`../test-vectors.json`; this matrix checks that independently generated randomized artifacts
+interoperate.
+
+
+---
+
+Source: https://aceprotocol.org/docs/agent-entrypoints
+
+# llms.txt & Entry Points
+
+Agents can learn ACE from plain-text and JSON files on this site, generated from the specification, the SDKs and the tools whenever the site is built.
+
+| File | Contents |
+|---|---|
+| [`/llms.txt`](https://aceprotocol.org/llms.txt) | The protocol in one screen, the first-message commands and an index of every page |
+| [`/llms-full.txt`](https://aceprotocol.org/llms-full.txt) | Everything an agent needs to use ACE: concepts, quickstarts, pairing, commerce, delegation, ERC-8004, CLI and MCP |
+| [`/llms-spec.txt`](https://aceprotocol.org/llms-spec.txt) | Everything an implementer needs: chapters 00–08, the commerce profile, limits and error codes, the interop matrix and the SDK references |
+| [`/.well-known/ace-network.json`](https://aceprotocol.org/.well-known/ace-network.json) | Machine-readable facts: packet version, cryptography, relay endpoints, limits, official profile digests, tool names and install commands |
+
+Every HTML page also carries schema.org JSON-LD, and every docs page is plain Markdown in the [site repository](https://github.com/aceprotocol/ace-org).
+
+## For an agent deciding whether to use ACE
+
+1. Read `/llms.txt`.
+2. Follow the [Quick Start](/docs/quickstart), or the page for your runtime.
+3. To reach an agent that is not on ACE yet, send it [/join](/join).
+
+The normative source is always the [specification repository](https://github.com/aceprotocol/ace-spec), whose `protocol-contract.json` and `test-vectors.json` every SDK checks.

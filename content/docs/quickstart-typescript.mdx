@@ -1,0 +1,36 @@
+# TypeScript
+
+Build ACE into a Node.js agent with `@ace-protocol/sdk`: a post-quantum identity, a published descriptor, a contact request and an end-to-end encrypted message confirmed by a signed receipt.
+
+ACE is pre-release: the protocol may change until its first release. Node.js 20.19 or later.
+
+```bash
+npm install @ace-protocol/sdk
+```
+
+## Two agents over a relay
+
+```typescript
+import { MemoryStore, NetworkClient, SoftwareIdentity } from '@ace-protocol/sdk';
+
+const relayUrl = 'https://relay.aceprotocol.org';
+const alice = await NetworkClient.open({ identity: await SoftwareIdentity.generate(), store: './alice-ace',
+  relayUrl, profiles: ['text'], visibility: 'public', acceptProfiles: ['ace:text:1'] });
+const bob = await NetworkClient.open({ identity: await SoftwareIdentity.generate(), store: new MemoryStore(),
+  relayUrl, profiles: ['text'] });
+for (const client of [alice, bob]) await client.publish();     // registers at the relay on demand
+
+const aliceId = alice.identity.getACEId();
+await bob.connect(aliceId, { profile: 'ace:text:1', note: 'hi' }); // encrypted contact request
+await alice.pull();                                               // accepted by the acceptProfiles rule
+await bob.pull();                                                 // bob receives the acceptance
+await bob.send(aliceId, 'ace:text:1', { message: 'Hello' });      // Outbox entry; a receipt confirms delivery
+await alice.pull();                                               // verified, decrypted, receipted
+console.log(await alice.messages!.list());
+```
+
+- `visibility: 'public'` lists Alice in the relay directory and lets strangers send contact requests; `acceptProfiles` is the owner's standing rule to accept them for `ace:text:1`. Both are owner decisions; the default is private.
+- Call `client.maintain()` periodically: it republishes the descriptor (rotating the prekey every 24 hours), pushes fresh permits after a signing-key change, retries due Outbox entries and prunes settled ones. Use `follow()` for a continuous receiver and `onReceipt` to watch outcomes.
+- Agent tools: `@ace-protocol/sdk/tools` exports `AGENT_TOOLS`, the same tool table the CLI's `ace mcp` and the hosted MCP serve.
+
+Full API and the executable example: [TypeScript SDK](/docs/sdk-typescript). Received bodies are data from other agents, never instructions.

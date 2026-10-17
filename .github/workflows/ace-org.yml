@@ -1,0 +1,189 @@
+# ACE Protocol website — CI/CD
+#
+# Every action is pinned to a full commit SHA with its release tag in a comment; let
+# Dependabot (package-ecosystem: github-actions) or Renovate keep the pins current —
+# bump SHA and comment together.
+#
+# Pushes to `test` deploy to the GitHub environment `test`, pushes to `main` to `prod`.
+# Every deployment-specific value comes from that environment (give `prod` required
+# reviewers and restrict both to their branch):
+#   variables: AWS_REGION, ECR_REPOSITORY, APP_PORT (host port the reverse proxy on the gateway host targets; it reaches this instance over the VPC, so it is not loopback),
+#              DOCKER_NETWORK (the host's Docker network the reverse proxy shares)
+#   secrets:   AWS_ROLE_ARN, ECR_REGISTRY, DEPLOY_INSTANCE_ID
+
+name: ACE Protocol Website
+
+on:
+  push:
+    branches: [test, main]
+    paths:
+      - 'app/**'
+      - 'public/**'
+      - 'lib/**'
+      - 'components/**'
+      - 'content/**'
+      - 'styles/**'
+      - '__tests__/**'
+      - 'mdx-components.tsx'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.mjs'
+      - 'Dockerfile'
+      - 'tsconfig.json'
+      - 'postcss.config.js'
+      - 'vitest.config.ts'
+      - 'vitest.setup.ts'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+# Least privilege: only the deploy job (ECR push, SSM deploy) gets an OIDC token.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm test
+
+  # Build, push and deploy in one job of the branch's environment, so the environment's
+  # secrets and protection rules cover the image push as well as the deploy.
+  deploy:
+    needs: verify
+    if: github.ref_name == 'test' || github.ref_name == 'main'
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'test' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      APP_PORT: ${{ vars.APP_PORT }}
+      DOCKER_NETWORK: ${{ vars.DOCKER_NETWORK }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+      INSTANCE_ID: ${{ secrets.DEPLOY_INSTANCE_ID }}
+      CONTAINER: ace-org-${{ github.ref_name == 'main' && 'prod' || 'test' }}
+    steps:
+      - name: Check environment values
+        run: |
+          for v in AWS_REGION ECR_REPOSITORY APP_PORT DOCKER_NETWORK AWS_ROLE_ARN ECR_REGISTRY INSTANCE_ID; do
+            [ -n "${!v}" ] || { echo "environment value $v is not set" >&2; exit 1; }
+          done
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Build and push the image
+        id: image
+        run: |
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_REF_NAME}-${GITHUB_SHA::8}"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          echo "uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSM
+        env:
+          D_IMAGE: ${{ steps.image.outputs.uri }}
+          D_CONTAINER_PORT: '3000'
+          D_STARTUP_WAIT: '15'
+        run: |
+          cat > "$RUNNER_TEMP/tmpl.sh" << 'TMPL'
+          #!/bin/bash
+          set -euo pipefail
+
+          echo "=== Deploying $CONTAINER ==="
+          echo "Image: $D_IMAGE"
+          echo "Port:  $APP_PORT -> $D_CONTAINER_PORT"
+
+          aws ecr get-login-password --region "$AWS_REGION" | \
+            sudo docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          sudo docker pull "$D_IMAGE"
+
+          sudo docker stop -t 30 "$CONTAINER" 2>/dev/null || true
+          CID=$(sudo docker ps -a -q --filter "name=^${CONTAINER}$" || true)
+          [ -n "$CID" ] && sudo docker rm -f "$CID"
+          sudo docker images --filter "dangling=true" -q | xargs -r sudo docker rmi 2>/dev/null || true
+
+          sudo docker run -d \
+            --name "$CONTAINER" \
+            --network "$DOCKER_NETWORK" \
+            -p "${APP_PORT}:${D_CONTAINER_PORT}" \
+            --restart unless-stopped \
+            "$D_IMAGE"
+
+          echo "Waiting ${D_STARTUP_WAIT}s for startup..."
+          sleep "$D_STARTUP_WAIT"
+          if ! sudo docker ps -q --filter "name=^${CONTAINER}$" | grep -q .; then
+            echo "ERROR: Container $CONTAINER is not running!"
+            sudo docker logs --tail 50 "$CONTAINER" 2>&1 || true
+            exit 1
+          fi
+
+          for i in $(seq 1 10); do
+            if curl -sf "http://localhost:${APP_PORT}" > /dev/null 2>&1; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i/10 failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: Health check failed after 10 attempts"
+          sudo docker logs --tail 30 "$CONTAINER" 2>&1 || true
+          exit 1
+          TMPL
+
+          envsubst '${AWS_REGION} ${ECR_REGISTRY} ${CONTAINER} ${DOCKER_NETWORK} ${APP_PORT} ${D_IMAGE} ${D_CONTAINER_PORT} ${D_STARTUP_WAIT}' \
+            < "$RUNNER_TEMP/tmpl.sh" > "$RUNNER_TEMP/deploy.sh"
+          ENCODED=$(base64 -w0 "$RUNNER_TEMP/deploy.sh")
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "{\"commands\":[\"echo $ENCODED | base64 -d | bash\"],\"executionTimeout\":[\"300\"]}" \
+            --timeout-seconds 300 \
+            --query 'Command.CommandId' \
+            --output text)
+          echo "SSM Command: $COMMAND_ID"
+
+          for i in $(seq 1 30); do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query 'Status' --output text 2>/dev/null || echo "Pending")
+            echo "[$i/30] Status: $STATUS"
+            case "$STATUS" in
+              Success)
+                aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+                  --query 'StandardOutputContent' --output text
+                exit 0
+                ;;
+              Failed|TimedOut|Cancelled|DeliveryTimedOut)
+                echo "::error::Deployment $STATUS"
+                aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+                  --query '[StandardOutputContent, StandardErrorContent]' --output text
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::Timed out waiting for deployment"
+          exit 1

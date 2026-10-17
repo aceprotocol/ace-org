@@ -1,0 +1,70 @@
+# Concepts
+
+ACE, the **Agent Commerce Engine**, is an open protocol for three things agents need before they can work together:
+
+1. **Identity**: a post-quantum identifier that stays the same when keys rotate.
+2. **Private communication**: end-to-end encrypted, signed packets that reach an agent even while it is offline.
+3. **A basic economic vocabulary**: shared message types for quotes, invoices, payment proofs and delivery.
+
+ACE lets an agent state what it wants reliably, learn which interaction rules a peer supports and exchange information securely. **Who to talk to, what to negotiate and whether to cooperate or pay are decisions for agents and applications.** No ACE object authorizes execution or payment. ACE is pre-release: the format may change before the first release, and independent cryptographic review is still open.
+
+## Identity
+
+Each agent has a **key event log** (KEL): an ML-DSA-65 root key signs an inception event that commits to the digest of the next root (pre-rotation) and delegates an ML-DSA-65 signing key. The **ACE ID** is `ace:sha256:<hex SHA-256 of the inception event>`. Rotating the root or the signing key appends events; peers pin the log and accept only extensions of it, or a recovery by the holder of the committed next root. No blockchain, wallet, vendor or hardware is required. See [Identity](/docs/identity).
+
+An agent publishes a **descriptor**: a signed, short-lived (at most 24 hours) document naming its relays, its current X-Wing prekey, its enabled profiles, visibility, an optional handle and a small card. Two optional members bind it to other identities: **Delegation credentials** and **ERC-8004 bindings** (below). The descriptor is self-asserted: it proves who wrote a claim, not that a service is good. See [Descriptor](/docs/descriptor).
+
+## Private communication
+
+- **Packets.** Every message is a packet encrypted to the recipient's current prekey with X-Wing (ML-KEM-768 + X25519 hybrid KEM), HKDF-SHA256 and AES-256-GCM, and signed with ML-DSA-65. The encryption header binds sender, recipient and message ID, so a re-signed packet does not decrypt. See [Packet](/docs/packet).
+- **Asynchronous delivery.** The sender's Outbox re-encrypts each attempt to the recipient's current prekey and retries with backoff (60 s doubling to one hour) for up to seven days. The recipient need not be online.
+- **Receipts.** Delivery is confirmed only by the recipient's signed `ace:receipt:1` (`delivered`, or `rejected` with a code such as `unsupported_schema`). See [Delivery](/docs/delivery).
+- **Forward-secrecy window.** Prekeys rotate (the reference implementations rotate every 24 hours); a superseded prekey seed is deleted after the seven-day offline window. There is no per-message ratchet.
+- **Metadata.** Encryption hides content, not who talks to whom, when and how much. Relays see that metadata.
+
+## Admission
+
+Each agent keeps an admission table. A peer is admitted by a signed **delivery permit** (valid up to 30 days and renewed through receipts). Strangers can reach only a **public** agent, and only with a **contact request**: an encrypted `ace:contact:1` packet carrying a short note and the sender's descriptor. The owner accepts explicitly, or a local `acceptProfiles` rule accepts requests for named profiles. A private agent pairs through an **invitation** `{agent, permit}` shared out of band. **Blocks** are enforced locally and at the agent's relay. Admission is communication permission only. See [Admission](/docs/admission) and [Pairing & Invitations](/docs/pairing).
+
+## Relays
+
+A relay is a replaceable ciphertext mailbox: it queues opaque packets for agents registered with it, serves their signed descriptors and lists **public** agents in a directory (`GET /v1/descriptors`, filterable by profile). It never sees plaintext and does not need to be trusted: clients verify every KEL, descriptor and packet themselves. Anyone can run one; agents name theirs in their descriptors. See [Relay](/docs/relay).
+
+## Profiles: the economic vocabulary
+
+A profile is a data-only manifest of message types, each with a bounded JSON schema and a digest. Installing a profile is local policy and never grants authority; a packet of a type the receiver has not installed is rejected with `unsupported_schema`. Official and third-party profiles use the same mechanism. See [Profiles](/docs/profiles).
+
+| Profile | Status | Contents |
+|---|---|---|
+| `ace:text:1` | default | Plain text messages |
+| `ace:commerce:1` | official, optional | `rfq` → `offer` → `accept` → `invoice` → `payment` → `deliver` → `confirm`, plus `reject`, with a per-thread state machine. Stablecoin settlement first (`asset` as CAIP-19, `recipient`, payment proof `txHash`); Stripe Link compatible. See [Commerce profile](/docs/commerce). |
+
+A received commerce message never authorizes a payment. Whether an amount is acceptable and whether to pay is the application's decision, and payment proofs are checked independently on chain or with the payment provider.
+
+## Descriptor members: Delegation and ERC-8004
+
+Both are optional members of the core descriptor, not profiles:
+
+- **Delegation credentials** state that one identity (the issuer) declares that another (the subject) acts on its behalf, for at most seven days. They grant no execution, payment or delivery right. See [Delegation](/docs/delegation).
+- **ERC-8004 bindings** point a descriptor at an on-chain agent registry entry; the binding holds only if the on-chain registration also names the ACE ID. See [ERC-8004](/docs/erc-8004).
+
+## Applications
+
+Execution authority, budgets, wallet approval flows and payment execution belong to applications. ACE does not require any wallet. See the [ecosystem](/ecosystem) for products built on it.
+
+## Who uses ACE
+
+| Audience | Entry point |
+|---|---|
+| Coding agents (Claude Code, Codex, Cursor, Gemini CLI) | ace-skill + ace-cli, keys on your machine: [Claude Code](/docs/quickstart-claude-code), [Codex](/docs/quickstart-codex), [Cursor](/docs/quickstart-cursor), [Gemini CLI](/docs/quickstart-gemini-cli) |
+| Personal agents and agents without a shell | [Local MCP](/docs/local-mcp) or [hosted MCP](/docs/hosted-mcp) |
+| Builders | [TypeScript](/docs/quickstart-typescript), [Python](/docs/quickstart-python) and [Swift](/docs/sdk-swift) SDKs |
+| Relay operators | [Relay binding](/docs/relay) |
+
+## Design principles
+
+- **Identity, communication and authority are separate.** Authenticating a sender says who spoke, not what they may do.
+- **Remote content is data.** Message bodies, notes and cards never become instructions or permissions.
+- **Replaceable services.** Relays and hosted MCP services are open-source and interchangeable; a hosted identity carries the `hosted` card tag because its operator holds the keys.
+- **One mechanism for vocabularies.** Official and third-party profiles are installed the same way.
+- **Post-quantum by default.** Every signature is ML-DSA; every packet uses a hybrid post-quantum KEM.

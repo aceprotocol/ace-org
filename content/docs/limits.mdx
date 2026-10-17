@@ -1,0 +1,67 @@
+# Limits and Error Codes
+
+Generated from [`protocol-contract.json`](https://github.com/aceprotocol/ace-spec/blob/main/protocol-contract.json), the [constants of chapter 02](/docs/encoding#constants) and the [error codes of chapter 06](/docs/delivery#error-codes). Every SDK checks its constants against the contract.
+
+## Wire identifiers
+
+| Item | Value |
+|---|---|
+| Packet version (`ace`) | `"1"` |
+| Signature domain | `ace.v1` |
+| Signatures | `ml-dsa-65` (ML-DSA, FIPS 204) |
+| Packet KEM | X-Wing, `draft-connolly-cfrg-xwing-kem-11` |
+| Core message types | `ace:receipt:1`, `ace:contact:1` |
+| Official profiles | `ace:core:1`, `ace:text:1`, `ace:commerce:1` |
+| Relay authentication headers | `X-ACE-Audience`, `X-ACE-Nonce`, `X-ACE-Id`, `X-ACE-Timestamp`, `X-ACE-Seq`, `X-ACE-Signature` |
+
+## Constants
+
+Normative values used by every implementation and relay.
+
+| Name | Value | Meaning |
+|---|---|---|
+| `TIMESTAMP_WINDOW_SECONDS` | 300 | Future bound for every signed timestamp; freshness window for relay requests |
+| `OFFLINE_WINDOW_SECONDS` | 604800 | Past bound for packets; relay queue retention; Outbox retry horizon; lifetime of an outgoing `pending` entry; prekey retention; minimum relay retention of an unregistered identity's KEL |
+| `MAX_PLAINTEXT_BYTES` | 1179648 | Canonical private content (1 MiB + 128 KiB) |
+| `MAX_PACKET_BYTES` | 2097152 | Canonical JSON of a packet |
+| `MAX_SEND_BODY_BYTES` | 2162688 | Body of `POST /v1/send` (`MAX_PACKET_BYTES + 65536`) |
+| `MAX_PUBLISHED_AGENT_BYTES` | 1048576 | Canonical JSON of a PublishedAgent; also bounds a registration request |
+| `MAX_JSON_DEPTH` | 32 | Depth of each protocol object ([§ JSON values](#json-values)) |
+| `MAX_TYPE_BYTES` | 256 | Namespaced identifier |
+| `MAX_THREAD_ID_LENGTH` | 256 | Thread ID code points |
+| `MAX_KEL_EVENTS` | 256 | Events per KEL |
+| `MAX_SIGNING_KEY_LIFETIME` | 31622400 | `notAfter - ts` of a `dlg` signing key |
+| `MAX_DESCRIPTOR_LIFETIME` | 86400 | `expiresAt - issuedAt` of a descriptor |
+| `MAX_DELEGATION_LIFETIME` | 604800 | `expiresAt - issuedAt` of a delegation credential |
+| `MAX_PERMIT_LIFETIME` | 2592000 | `expiresAt - issuedAt` of a delivery permit |
+| `PERMIT_RENEWAL_SECONDS` | 1296000 | Remaining permit lifetime below which a receipt carries a renewal |
+| `MAX_RETAINED_PREKEYS` | 16 | Superseded prekey seeds an endpoint retains |
+| `MAX_EXT_BYTES` | 4096 | Canonical JSON of a descriptor `ext` |
+| `MAX_NOTE_BYTES` | 512 | UTF-8 bytes of a contact `note` |
+| `MAX_INBOX_PAGE` | 100 | Maximum `limit` of inbox and directory pages; default inbox `limit` |
+| `DEFAULT_PAGE_LIMIT` | 20 | Default `limit` of directory pages |
+| `MAX_PAGE_BYTES` | 8388608 | Serialized inbox or directory page |
+| `MAX_MANIFEST_BYTES` | 65536 | Canonical JSON of a profile manifest |
+| `MAX_PENDING_CONTACT_REQUESTS` | 16 | Held incoming contact requests ([05](/docs/admission#flow)) |
+| `CONTACT_REQUEST_TTL_SECONDS` | 86400 | Lifetime of a held incoming contact request and of a relay's stranger entries |
+| `MAX_STRANGER_KEL_EVENTS` | 32 | Events per KEL in a stranger's contact `source` (its own and each delegation's) |
+| `MAX_STRANGER_DELEGATIONS` | 1 | Delegation entries in a stranger's contact `source` |
+| `STRANGER_ALLOWANCE` | 16 | Queued stranger entries per recipient at a relay ([07](/docs/relay#send)) |
+| `STRANGER_NETWORK_ALLOWANCE` | 2 | Queued stranger entries per client network per recipient at a relay |
+| `CLIENT_NETWORK_PREFIX_IPV4` | 24 | Prefix length of an IPv4 client network ([07](/docs/relay#client-networks)) |
+| `CLIENT_NETWORK_PREFIX_IPV6` | 56 | Prefix length of an IPv6 client network |
+| `MIN_BLOCK_CAP` | 256 | Least number of tracked block peers per identity a relay may cap at |
+| `PIN_REFRESH_INTERVAL_SECONDS` | 30 | Minimum interval between pin refreshes of one sender in the receive pipeline |
+| `MAX_FETCH_ATTEMPTS` | 3 | Fetches of one inbox entry without a final disposition before it is quarantined |
+
+## Error codes
+
+An SDK reports every failure as one error type carrying a `code`, whose category is fixed. `transient` and `local` failures are retryable; `permanent` ones are not.
+
+| Category | Codes |
+|---|---|
+| `permanent` | `invalid_argument`, `invalid_packet`, `unsupported_version`, `wrong_recipient`, `invalid_signature`, `invalid_authorization`, `stale_timestamp`, `stale_peer_binding`, `decryption_failed`, `unknown_prekey`, `unsupported_schema`, `invalid_body`, `replay_horizon`, `invalid_kel`, `kel_conflict`, `unknown_peer`, `not_registered`, `not_permitted`, `relay_rejected`, `blocked_address`, `delivery_rejected`, `expired` |
+| `transient` | `relay_unavailable`, `relay_protocol_error`, `fetch_failed` |
+| `local` | `storage_failed`, `identity_unavailable`, `lock_busy`, `receiver_capacity`, `thread_busy` |
+
+`delivery_rejected` carries the receipt's `code` as its remote code. Profile rules MAY raise further permanent codes matching the outcome-code grammar ([profiles/commerce.md](/docs/commerce#check-order) defines the commerce codes). Relay responses map to these codes as specified in [07](/docs/relay#client-rules).

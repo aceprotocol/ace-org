@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* ── ACE Cyan ── */
+  --color-ace-cyan: #22d3ee;
+  --color-ace-cyan-dim: rgba(34, 211, 238, 0.15);
+  --color-ace-cyan-subtle: rgba(34, 211, 238, 0.06);
+
+  /* ── Dark Backgrounds ── */
+  --color-dark-bg-primary: #09090b;
+  --color-dark-bg-card: #0a0a0a;
+  --color-dark-bg-elevated: #111111;
+
+  /* ── Dark Borders ── */
+  --color-dark-border: #27272a;
+  --color-dark-border-card: #1a1a1a;
+  --color-dark-border-faint: #0f0f0f;
+
+  /* ── Dark Text ── */
+  --color-dark-text-primary: #fafafa;
+  --color-dark-text-secondary: #a1a1aa;
+  --color-dark-text-muted: #71717a;
+  --color-dark-text-faint: #3f3f46;
+
+  /* ── Grid ── */
+  --color-dark-grid: rgba(39, 39, 42, 0.3);
+
+  /* ── Pass Colors ── */
+  --color-tigerpass-amber: #d4a04a;
+  --color-soulpass-gold: #c4a962;
+
+  /* ── Fonts ── */
+  --font-display: system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ── Animations ── */
+  --animate-fade-in-up: fadeInUp 0.5s ease-out both;
+  --animate-pulse-glow: pulseGlow 4s ease-in-out infinite;
+}
+
+/* ── Keyframes ── */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.3));
+  }
+  50% {
+    filter: drop-shadow(0 0 20px rgba(34, 211, 238, 0.6));
+  }
+}
+
+/* ── Utility Classes ── */
+@utility grid-bg {
+  background-image:
+    linear-gradient(to right, var(--color-dark-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-dark-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+@utility section-label {
+  font-size: 10px;
+  letter-spacing: 0.25em;
+  color: var(--color-ace-cyan);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+@utility card-surface {
+  background-color: var(--color-dark-bg-card);
+  border: 1px solid var(--color-dark-border-card);
+  border-radius: 0.5rem;
+}
+
+@utility btn-primary {
+  background-color: var(--color-ace-cyan);
+  color: var(--color-dark-bg-primary);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.375rem;
+  transition: opacity 0.15s ease;
+  &:hover {
+    opacity: 0.9;
+  }
+}
+
+@utility btn-secondary {
+  border: 1px solid var(--color-dark-border);
+  color: var(--color-dark-text-muted);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.375rem;
+  transition: all 0.15s ease;
+  &:hover {
+    color: var(--color-dark-text-primary);
+    border-color: var(--color-dark-text-muted);
+  }
+}
+
+@utility code-block {
+  background-color: var(--color-dark-bg-card);
+  border: 1px solid var(--color-dark-border-card);
+  border-radius: 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+/* ── Scroll reveal: CSS only, skipped where unsupported or when reduced motion is requested ── */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .reveal {
+      animation: fadeInUp linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 35%;
+    }
+  }
+}

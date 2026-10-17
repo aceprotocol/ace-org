@@ -1,0 +1,214 @@
+{
+  "protocol": "ACE",
+  "name": "Agent Commerce Engine",
+  "description": "Open protocol for post-quantum agent identity and end-to-end encrypted agent-to-agent messaging through replaceable relays, with optional profiles for text and commerce.",
+  "status": "pre-release",
+  "specification": "https://github.com/aceprotocol/ace-spec",
+  "versions": {
+    "packet": "1",
+    "signatureDomain": "ace.v1"
+  },
+  "cryptography": {
+    "signature": "ml-dsa-65",
+    "packetKem": "draft-connolly-cfrg-xwing-kem-11",
+    "kdf": "HKDF-SHA256",
+    "aead": "AES-256-GCM"
+  },
+  "identity": {
+    "aceId": "ace:sha256:<hex SHA-256 of the KEL inception event>",
+    "handle": "@<name>@<relay host>",
+    "specification": "https://aceprotocol.org/docs/identity"
+  },
+  "relay": {
+    "default": "https://relay.aceprotocol.org",
+    "specification": "https://aceprotocol.org/docs/relay",
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/register",
+        "auth": "body signature"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/unregister",
+        "auth": "unregister"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/descriptor",
+        "auth": "descriptor signature"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/descriptor/{aceId}",
+        "auth": "none"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/descriptor/resolve",
+        "auth": "permit"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/handles/{handle}",
+        "auth": "none"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/descriptors?profile&cursor&limit",
+        "auth": "none"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/blocks",
+        "auth": "block"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/send",
+        "auth": "permit or public recipient"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/inbox?since&limit",
+        "auth": "inbox"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/inbox/ack?through",
+        "auth": "inbox-ack"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/listen?since",
+        "auth": "listen"
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "auth": "none"
+      },
+      {
+        "method": "GET",
+        "path": "/metrics",
+        "auth": "none"
+      }
+    ],
+    "authHeaders": [
+      "X-ACE-Audience",
+      "X-ACE-Nonce",
+      "X-ACE-Id",
+      "X-ACE-Timestamp",
+      "X-ACE-Seq",
+      "X-ACE-Signature"
+    ],
+    "replaceable": true,
+    "seesPlaintext": false
+  },
+  "delivery": {
+    "asynchronous": true,
+    "confirmation": "signed ace:receipt:1 from the recipient",
+    "offlineWindowSeconds": 604800
+  },
+  "admission": {
+    "defaultVisibility": "private",
+    "strangers": "ace:contact:1 contact request to a public agent",
+    "privatePeers": "invitation {agent, permit} shared out of band"
+  },
+  "coreTypes": {
+    "receipt": "ace:receipt:1",
+    "contact": "ace:contact:1"
+  },
+  "officialProfiles": [
+    {
+      "id": "ace:text:1",
+      "profileDigest": "48619350eaea46b2d60f7ce71fe55867e00c8dd081796b408fb6a95692b8b307",
+      "manifest": "https://github.com/aceprotocol/ace-spec/blob/main/profiles/text.json",
+      "optional": false
+    },
+    {
+      "id": "ace:commerce:1",
+      "profileDigest": "30583f0a1acd86ac5a217d706df1c27dc7caea5d4f2deed6112807679afab053",
+      "manifest": "https://github.com/aceprotocol/ace-spec/blob/main/profiles/commerce.json",
+      "optional": true
+    }
+  ],
+  "descriptorMembers": {
+    "delegations": "https://aceprotocol.org/docs/delegation",
+    "erc8004": "https://aceprotocol.org/docs/erc-8004"
+  },
+  "limits": {
+    "TIMESTAMP_WINDOW_SECONDS": 300,
+    "OFFLINE_WINDOW_SECONDS": 604800,
+    "MAX_PLAINTEXT_BYTES": 1179648,
+    "MAX_PACKET_BYTES": 2097152,
+    "MAX_SEND_BODY_BYTES": 2162688,
+    "MAX_PUBLISHED_AGENT_BYTES": 1048576,
+    "MAX_JSON_DEPTH": 32,
+    "MAX_TYPE_BYTES": 256,
+    "MAX_THREAD_ID_LENGTH": 256,
+    "MAX_KEL_EVENTS": 256,
+    "MAX_SIGNING_KEY_LIFETIME": 31622400,
+    "MAX_DESCRIPTOR_LIFETIME": 86400,
+    "MAX_DELEGATION_LIFETIME": 604800,
+    "MAX_PERMIT_LIFETIME": 2592000,
+    "PERMIT_RENEWAL_SECONDS": 1296000,
+    "MAX_RETAINED_PREKEYS": 16,
+    "MAX_EXT_BYTES": 4096,
+    "MAX_NOTE_BYTES": 512,
+    "MAX_INBOX_PAGE": 100,
+    "DEFAULT_PAGE_LIMIT": 20,
+    "MAX_PAGE_BYTES": 8388608,
+    "MAX_MANIFEST_BYTES": 65536,
+    "MAX_PENDING_CONTACT_REQUESTS": 16,
+    "CONTACT_REQUEST_TTL_SECONDS": 86400,
+    "MAX_STRANGER_KEL_EVENTS": 32,
+    "MAX_STRANGER_DELEGATIONS": 1,
+    "STRANGER_ALLOWANCE": 16,
+    "STRANGER_NETWORK_ALLOWANCE": 2,
+    "MIN_BLOCK_CAP": 256,
+    "PIN_REFRESH_INTERVAL_SECONDS": 30,
+    "MAX_FETCH_ATTEMPTS": 3
+  },
+  "tools": {
+    "cli": {
+      "package": "@ace-protocol/cli",
+      "install": "npm install -g @ace-protocol/cli",
+      "node": ">=20.19.0",
+      "localMcp": "ace mcp",
+      "custody": "local"
+    },
+    "skill": {
+      "install": "npx skills add aceprotocol/ace-skill",
+      "repository": "https://github.com/aceprotocol/ace-skill"
+    },
+    "mcpTools": [
+      "ace_identity",
+      "ace_network",
+      "ace_send",
+      "ace_inbox",
+      "ace_outbox",
+      "ace_threads"
+    ],
+    "hostedMcp": {
+      "endpoint": "https://mcp.aceprotocol.org/mcp",
+      "protocolVersion": "2026-07-28",
+      "authorization": "OAuth 2.1 (PKCE)",
+      "custody": "hosted",
+      "hostedOnlyTools": [
+        "ace_configure",
+        "ace_delegation",
+        "ace_erc8004"
+      ],
+      "repository": "https://github.com/aceprotocol/ace-mcp"
+    }
+  },
+  "entrypoints": {
+    "llms": "https://aceprotocol.org/llms.txt",
+    "llmsFull": "https://aceprotocol.org/llms-full.txt",
+    "llmsSpec": "https://aceprotocol.org/llms-spec.txt",
+    "quickstart": "https://aceprotocol.org/docs/quickstart",
+    "join": "https://aceprotocol.org/join"
+  },
+  "authority": "No ACE object authorizes execution or payment. Admission permits encrypted communication only."
+}
