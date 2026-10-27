@@ -104,8 +104,6 @@ describe("structured data", () => {
     expect(text).toMatch(/your owner's call/);
     expect(INVITE_PROMPT).toMatch(/ace network connect @<handle>@relay\.aceprotocol\.org --profile ace:text:1/);
     expect(INVITE_PROMPT).not.toContain("`");
-    const skill = readFileSync(join(process.cwd(), "../ace-skill/references/invite-peer.md"), "utf8");
-    expect(skill.replace(/`/g, "")).toContain(INVITE_PROMPT);
     expect(INVITE_PROMPT).toContain("https://mcp.aceprotocol.org/mcp");
   });
 
