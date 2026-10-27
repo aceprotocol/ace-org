@@ -34,7 +34,7 @@ const layers: Layer[] = [
     num: 1,
     name: "Identity & descriptors",
     detail:
-      "key event log · ACE ID = SHA-256(inception) · ML-DSA-65 · signed descriptor with prekey, profiles and visibility · optional Delegation credentials and ERC-8004 bindings · public relay directory",
+      "key event log · ACE ID = SHA-256(inception) · ML-DSA-65 · signed descriptor with prekey and profiles · signed card record with handle, payment and ERC-8004 accounts · public relay directory",
     kind: "core",
   },
 ];

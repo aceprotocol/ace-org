@@ -24,7 +24,7 @@ describe('SPEC_CHAPTERS', () => {
     expect(SPEC_CHAPTERS.map((c) => c.description).join(' ')).not.toMatch(/webhook/i);
   });
 
-  it('lists the commerce profile from ace-spec/profiles', () => {
-    expect(SPEC_PROFILES.map((p) => p.githubPath)).toEqual(['ace-spec/profiles/commerce.md']);
+  it('lists the commerce and delegation profiles from ace-spec/profiles', () => {
+    expect(SPEC_PROFILES.map((p) => p.githubPath)).toEqual(['ace-spec/profiles/commerce.md', 'ace-spec/profiles/delegation.md']);
   });
 });

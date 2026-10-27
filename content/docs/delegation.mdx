@@ -1,6 +1,6 @@
 # Delegation
 
-A delegation credential is one signed edge between two identities: **the issuer declares that the subject acts on its behalf.** It is how an organisation's or a person's identity can vouch for an agent identity it runs. Normative rules: [Descriptor § Delegations](/docs/descriptor#delegations).
+A delegation credential is one signed edge between two identities: **the issuer declares that the subject acts on its behalf.** It is how an organisation's or a person's identity can vouch for an agent identity it runs. Credentials are the official optional profile `ace:delegation:1`; normative rules: [Delegation profile](/docs/delegation-profile).
 
 It grants nothing. A credential carries no execution, payment or communication right; verifiers decide what, if anything, it means for them. Revocation is by not renewing: a credential lasts at most seven days and the issuer re-issues it.
 
@@ -10,7 +10,11 @@ It grants nothing. A credential carries no execution, payment or communication r
 { "issuer": "ace:sha256:…", "subject": "ace:sha256:…", "issuedAt": 1760140800, "expiresAt": 1760745600, "signature": { "scheme": "ml-dsa-65", "seq": 1, "value": "…" } }
 ```
 
-The issuer signs with its current ML-DSA-65 signing key (action `delegation`). The subject attaches up to four entries `{kel, credential}` to its descriptor, each with the issuer's full KEL so anyone can verify it. Expired entries are dropped during verification; they do not invalidate the descriptor.
+The issuer signs with its current ML-DSA-65 signing key (action `ace:delegation:1`). The subject publishes up to four credentials, one per issuer, in its descriptor extension `ext["ace:delegation:1"] = {credentials}`. Descriptor verification checks only their shape; it never checks a credential signature.
+
+## Verifying
+
+A peer that needs to know whether the subject acts for the issuer looks the issuer up, pins its key event log from its live descriptor, then requires `now < expiresAt` and the signature to verify under that pin. A lookup failure is reported as that failure (for example `unknown_peer`), never as "not delegated". When the issuer's pin changes, the credential is verified again.
 
 ## With the CLI
 
@@ -19,9 +23,21 @@ The issuer signs with its current ML-DSA-65 signing key (action `delegation`). T
 ace delegation issue <subject-ace-id> --days 7 --out cred.json
 
 # On the subject
-ace delegation add cred.json      # attaches it and republishes the descriptor
+ace delegation add cred.json      # looks the issuer up, verifies, publishes it in the descriptor ext
 ```
 
-Hosted MCP: `ace_delegation` with `issue` (needs the `ace:admission` scope), `attach`, `detach` and `list`. SDKs: `createDelegationCredential` / `verifyDelegation` (TypeScript), `createDelegation` / `verifyDelegation` (Swift), `issue_delegation` / `verify_delegation` (Python).
+The file is the bare credential, without a key event log. `add` verifies it against the issuer's live descriptor, so the issuer must be published.
 
-The words *controller* (issuer) and *delegate* (subject) are informal; the protocol has no role enumeration.
+## MCP and SDKs
+
+Hosted MCP: `ace_delegation` with `issue` (needs the `ace:admission` scope), `attach` (takes `credential`), `detach` (takes `issuer`) and `list`.
+
+| | TypeScript | Python | Swift |
+|---|---|---|---|
+| Issue | `createDelegationCredential` | `create_delegation_credential` | `createDelegationCredential(issuer:subject:now:ttl:)` |
+| Check a descriptor extension (shape only) | `validateDelegationExt` | `validate_delegation_ext` | `validateDelegationExt(_:subject:now:)` |
+| Verify against a pinned issuer | `verifyDelegationCredential` | `verify_delegation_credential` | `verifyDelegationCredential(_:issuer:now:)` |
+| Look the issuer up and verify | `NetworkClient.verifyDelegation` | `NetworkClient.verify_delegation` | `NetworkClient.verifyDelegation(_:)` |
+| Message rule | `delegationRules` | `delegation_rules` | `delegationRules(peers:localAceId:)` |
+
+The TypeScript SDK exports the profile ID as `DELEGATION_PROFILE_ID`. The words *controller* (issuer) and *delegate* (subject) are informal; the protocol has no role enumeration.

@@ -8,11 +8,11 @@ A public agent is listed in its relay's directory, resolvable by handle and acce
 
 ```bash
 ace network discover --profile ace:commerce:1 --limit 20      # next page: --cursor <cursor>
-ace network lookup @alice@relay.aceprotocol.org                # or a full ACE ID; verifies the descriptor
+ace network lookup @alice@relay.aceprotocol.org                # or a full ACE ID; verifies the descriptor and card record
 ace network connect @alice@relay.aceprotocol.org --profile ace:text:1 --note "Translation request, 2k words"
 ```
 
-- Every listed agent is a verified signed descriptor. Cards, profiles and `ext` are self-asserted: the signature proves who said it, not that it is true.
+- Every directory entry is a verified signed card record; `lookup` one before connecting. Cards, `pay`, `erc8004`, profiles and `ext` are self-asserted: the signature proves who said it, not that it is true.
 - `connect` sends an encrypted `ace:contact:1` request for one profile both sides have installed; the note (at most 512 bytes) travels inside the ciphertext. It returns `{status: "pending", messageId, profile}`.
 - Lookup, import and discovery never admit anyone.
 

@@ -24,7 +24,7 @@ const sections: { id: string; title: string; body: React.ReactNode }[] = [
           or encrypts:
         </p>
         <ul>
-          <li><strong>Signatures:</strong> ML-DSA-65 (FIPS 204) for identity events, packets, descriptors, delivery permits, delegation credentials and relay authentication.</li>
+          <li><strong>Signatures:</strong> ML-DSA-65 (FIPS 204) for identity events, packets, descriptors, card records, delivery permits and relay authentication.</li>
           <li><strong>Encryption:</strong> every packet encapsulates a fresh secret to the recipient&apos;s signed X-Wing prekey (ML-KEM-768 + X25519, <code>{facts.xwing}</code>), which holds unless both components are broken, then HKDF-SHA256 and AES-256-GCM. The header binds sender, recipient, message ID, timestamp and prekey.</li>
           <li><strong>Algorithm agility:</strong> control of an identity rests on a hash commitment to the next root key, so a later revision can add a scheme that owners adopt at their next rotation without changing their ACE ID.</li>
         </ul>
@@ -87,8 +87,8 @@ const sections: { id: string; title: string; body: React.ReactNode }[] = [
     title: 'Review status and reporting',
     body: (
       <p>
-        ACE is pre-release and the protocol may change until its first release. Passing conformance tests is not an
-        independent cryptographic audit, which is still open. Report vulnerabilities through the affected
+        Version 1 is released. Passing conformance tests is not an independent cryptographic audit; the
+        specification, vectors and implementations are public so that anyone can audit them. Report vulnerabilities through the affected
         repository&apos;s private <em>Report a vulnerability</em> action, following the{' '}
         <a href={`${SPEC}/blob/main/SECURITY.md`}>security policy</a>; never post keys, tokens or a working exploit in a
         public issue.

@@ -1,20 +1,20 @@
 # ERC-8004 Binding
 
-[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) defines on-chain agent registries. ACE can bind a descriptor to an ERC-8004 agent; the binding is optional and ACE identity never depends on a chain. Normative rules: [Descriptor § ERC-8004](/docs/descriptor#erc-8004).
+[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) defines on-chain agent registries. ACE can bind an identity's card record to an ERC-8004 agent; the binding is optional and ACE identity never depends on a chain. Normative rules: [Descriptor § Card record](/docs/descriptor#card-record).
 
 ## Two directions
 
 A binding holds only when both directions hold:
 
-1. **ACE → chain.** The signed descriptor lists `{agentRegistry, agentId}` in `erc8004` (at most four entries). `agentRegistry` is the registry account in CAIP-10 form on any chain, for example `eip155:8453:0x…`; `agentId` is the registry's agent identifier: a decimal token ID of at most 78 digits on `eip155` chains, or 1–128 alphanumeric characters on other chains (for example a Solana base58 address).
+1. **ACE → chain.** The signed card record lists `{agentRegistry, agentId}` in `erc8004`, next to `pay` (at most four entries). `agentRegistry` is the registry account in CAIP-10 form on any chain, for example `eip155:8453:0x…`; `agentId` is the registry's agent identifier: a decimal token ID of at most 78 digits on `eip155` chains, or 1–128 alphanumeric characters on other chains (for example a Solana base58 address).
 2. **Chain → ACE.** The agent's on-chain registration file (its `tokenURI` document) contains the service entry `{"name": "ACE", "endpoint": "<aceId>"}`.
 
-ACE defines no chain signature format. SDKs validate the descriptor field and provide a pure function, `verifyErc8004Registration(registrationJson, aceId)` (`verify_erc8004_registration` in Python), that checks the second direction on a registration document the host fetched itself. Reading the chain is the host's job; the core SDKs contain no chain client.
+Like `pay`, an `erc8004` entry is claimed, not proven, and a client relies on it only after pinning the identity's key event log from a live descriptor. ACE defines no chain signature format. SDKs validate the card record field and provide a pure function, `verifyErc8004Registration(registrationJson, aceId)` (`verify_erc8004_registration` in Python), that checks the second direction on a registration document the host fetched itself. Reading the chain is the host's job; the core SDKs contain no chain client.
 
 ## With the CLI and MCP
 
 ```bash
-ace network configure --erc8004 eip155:8453:0x<registry>:42     # comma-separated; "" clears
+ace network configure --erc8004 eip155:8453:0x<registry>:42     # card record; comma-separated; "" clears
 ```
 
 Then add `{"name": "ACE", "endpoint": "<your ACE ID>"}` to the services of your ERC-8004 registration file. Hosted MCP: `ace_erc8004` with `attach`, `detach`, `list` and `verify` (checks a registration document you fetched).

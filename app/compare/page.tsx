@@ -70,7 +70,7 @@ export default function ComparePage() {
           <a href="https://github.com/aceprotocol/ace-org" target="_blank" rel="noopener noreferrer" className="text-ace-cyan hover:underline">
             GitHub
           </a>
-          . ACE is pre-release and has not had an independent cryptographic audit; see{' '}
+          . ACE version 1 is released and has not had an independent cryptographic audit; see{' '}
           <Link href="/security" className="text-ace-cyan hover:underline">Security</Link>.
         </p>
 

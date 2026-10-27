@@ -1,8 +1,8 @@
 {
   "protocol": "ACE",
   "name": "Agent Commerce Engine",
-  "description": "Open protocol for post-quantum agent identity and end-to-end encrypted agent-to-agent messaging through replaceable relays, with optional profiles for text and commerce.",
-  "status": "pre-release",
+  "description": "Open protocol for post-quantum agent identity and end-to-end encrypted agent-to-agent messaging through replaceable relays, with official profiles for text, delegation and commerce.",
+  "status": "released",
   "specification": "https://github.com/aceprotocol/ace-spec",
   "versions": {
     "packet": "1",
@@ -45,8 +45,13 @@
       },
       {
         "method": "POST",
-        "path": "/v1/descriptor/resolve",
-        "auth": "permit"
+        "path": "/v1/card",
+        "auth": "card record signature"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/card/{aceId}",
+        "auth": "none"
       },
       {
         "method": "GET",
@@ -55,7 +60,7 @@
       },
       {
         "method": "GET",
-        "path": "/v1/descriptors?profile&cursor&limit",
+        "path": "/v1/cards?tag&profile&cursor&limit",
         "auth": "none"
       },
       {
@@ -66,7 +71,7 @@
       {
         "method": "POST",
         "path": "/v1/send",
-        "auth": "permit or public recipient"
+        "auth": "permit or open recipient"
       },
       {
         "method": "GET",
@@ -127,16 +132,18 @@
       "optional": false
     },
     {
+      "id": "ace:delegation:1",
+      "profileDigest": "fc1653477df13c6c8be00d34ce4811d90365053c0afd2b858f90603eab474964",
+      "manifest": "https://github.com/aceprotocol/ace-spec/blob/main/profiles/delegation.json",
+      "optional": true
+    },
+    {
       "id": "ace:commerce:1",
       "profileDigest": "30583f0a1acd86ac5a217d706df1c27dc7caea5d4f2deed6112807679afab053",
       "manifest": "https://github.com/aceprotocol/ace-spec/blob/main/profiles/commerce.json",
       "optional": true
     }
   ],
-  "descriptorMembers": {
-    "delegations": "https://aceprotocol.org/docs/delegation",
-    "erc8004": "https://aceprotocol.org/docs/erc-8004"
-  },
   "limits": {
     "TIMESTAMP_WINDOW_SECONDS": 300,
     "OFFLINE_WINDOW_SECONDS": 604800,
@@ -144,26 +151,25 @@
     "MAX_PACKET_BYTES": 2097152,
     "MAX_SEND_BODY_BYTES": 2162688,
     "MAX_PUBLISHED_AGENT_BYTES": 1048576,
+    "MAX_CARD_RECORD_BYTES": 16384,
     "MAX_JSON_DEPTH": 32,
     "MAX_TYPE_BYTES": 256,
     "MAX_THREAD_ID_LENGTH": 256,
     "MAX_KEL_EVENTS": 256,
     "MAX_SIGNING_KEY_LIFETIME": 31622400,
-    "MAX_DESCRIPTOR_LIFETIME": 86400,
-    "MAX_DELEGATION_LIFETIME": 604800,
+    "MAX_DESCRIPTOR_LIFETIME": 604800,
     "MAX_PERMIT_LIFETIME": 2592000,
     "PERMIT_RENEWAL_SECONDS": 1296000,
     "MAX_RETAINED_PREKEYS": 16,
-    "MAX_EXT_BYTES": 4096,
+    "MAX_EXT_BYTES": 32768,
+    "MAX_PAY_ACCOUNTS": 8,
     "MAX_NOTE_BYTES": 512,
     "MAX_INBOX_PAGE": 100,
-    "DEFAULT_PAGE_LIMIT": 20,
     "MAX_PAGE_BYTES": 8388608,
     "MAX_MANIFEST_BYTES": 65536,
     "MAX_PENDING_CONTACT_REQUESTS": 16,
     "CONTACT_REQUEST_TTL_SECONDS": 86400,
     "MAX_STRANGER_KEL_EVENTS": 32,
-    "MAX_STRANGER_DELEGATIONS": 1,
     "STRANGER_ALLOWANCE": 16,
     "STRANGER_NETWORK_ALLOWANCE": 2,
     "MIN_BLOCK_CAP": 256,

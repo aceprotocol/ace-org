@@ -1,6 +1,6 @@
 # Python SDK
 
-Pre-release: the protocol may change until its first release. Build from source or from a release bundle produced by the [release procedure](https://github.com/aceprotocol/ace-spec/tree/main/release); a registry name is not evidence that a version has been published.
+Version 1 is released: a change to its wire formats is a new version.
 
 Python reference SDK for the ACE protocol: post-quantum agent identity (ML-DSA key event logs),
 private asynchronous packets (X-Wing prekeys + AES-256-GCM, ML-DSA signatures), signed receipts,
@@ -22,12 +22,14 @@ pip install ace-sdk
 | Identity | `SoftwareIdentity.generate/from_export/recover`, `.rotate()`, `.delegate()`, `verify_kel`, `extend_kel` |
 | Prekeys | `PrekeyVault()` (memory) / `PrekeyVault(path)` (0600 file): `current()`, `rotate(now)`, `open(id)`, `prune(now)` |
 | Packets | `encode_content`, `create_packet`, `decode_packet`, `verify_packet`, `decrypt_packet` |
-| Descriptors | `create_published_agent`, `verify_published_agent` -> `VerifiedAgent`; `issue_delegation`; `verify_erc8004_registration(json, ace_id)` |
+| Descriptors | `create_published_agent`, `verify_published_agent` -> `VerifiedAgent` |
+| Card records | `create_card_record` (`pay`, `erc8004`), `verify_card_bundle` -> `VerifiedCard`, `is_caip10_account`, `validate_erc8004`, `verify_erc8004_registration(json, ace_id)`; `RelayClient.publish_card/card/handle`; `NetworkClient.lookup_card/lookup_with_card` (descriptor first: no live descriptor, no card) |
 | Admission | `create_permit`, `verify_permit`, `PeerStore` (pins, `pending/admitted/blocked`, permits); `NetworkClient.create_invitation/import_invitation` |
 | Delivery | `Outbox` (persist, re-encrypt per attempt, backoff 60 s→1 h, expiry after 7 days, `prune`), `Inbox.open` (receive pipeline, receipts, quarantine) |
-| Profiles | `Profiles([TEXT, COMMERCE, ProfileManifest(custom)])`; core (`ace:receipt:1`, `ace:contact:1`) is always installed |
-| Rules | `ProfileRules` (`types`, `check(event, body)`, `commit(event, body)`; send-side `commit` on the `delivered` receipt, `thread_busy` while a governed message is in flight); optional `commerce_rules(store, ace_id)` |
-| Network | `RelayClient` (SSRF-safe; `allow_loopback=True` only for local development), `NetworkClient.open` |
+| Profiles | `Profiles([TEXT, DELEGATION, COMMERCE, ProfileManifest(custom)])`; core (`ace:receipt:1`, `ace:contact:1`) is always installed |
+| Rules | `ProfileRules` (`types`, `check(event, body)`, `commit(event, body)`; send-side `commit` on the `delivered` receipt, `thread_busy` while a governed message is in flight); optional `commerce_rules(store, ace_id)`, `delegation_rules(peers, ace_id)` |
+| Delegation | `ace:delegation:1`: `create_delegation_credential`, `validate_delegation_ext`, `verify_delegation_credential`, `NetworkClient.verify_delegation` (pins the issuer) |
+| Network | `RelayClient` (SSRF-safe; `allow_loopback=True` only for local development), `NetworkClient.open`; optional wake hints `set_wake(gateway, token)` / `clear_wake()` (07 § Wake hints) |
 | Relay auth | `create_auth_headers`, `create_registration_request` (relay-side verification lives in the relay) |
 
 ## Over a relay
@@ -41,12 +43,14 @@ net = NetworkClient.open(
     FileStore("state"),
     RelayClient("https://relay.aceprotocol.org"),
     PrekeyVault("state/prekeys.json"),
-    visibility="public",
-    handle="alice",
+    handle="alice",  # card record (04 § Card record): set once at this home relay
+    contact="open",  # strangers may send contact requests (default "closed")
+    listed=True,  # appear in the relay directory (default False)
     on_message=print,
     on_receipt=lambda frm, body, entry: print(body),
 )
-net.publish()  # registers on demand; prekey rotates every 24 h
+net.publish()  # descriptor, then card record; registers on demand; prekey rotates every 24 h
+net.lookup_card("@bob@relay.aceprotocol.org")  # verified card: handle, card, pay, contact
 net.connect("@bob@relay.aceprotocol.org", profile=TEXT.id, note="hi")
 net.pull()  # receive, send receipts, ack (or net.follow())
 for request in net.requests():  # requests never admit anyone by themselves
@@ -63,6 +67,20 @@ A relay's `{ok: true}` is not delivery: only a signed receipt settles an Outbox 
 Only one process may hold the receive role of a store (``Inbox``, lock ``receive``); others create
 ``NetworkClient.open(..., receive=False)`` to publish and send. Pass ``store=`` to ``RelayClient`` so registration
 timestamps stay strictly increasing across processes sharing an identity.
+
+## Delegation
+
+```python
+from ace import DELEGATION, TEXT, Profiles, create_delegation_credential
+
+net = NetworkClient.open(..., profiles=Profiles([TEXT, DELEGATION]))  # runs delegation_rules itself
+credential = create_delegation_credential(me, subject_id)  # 7 days at most; revoke by not renewing
+net.send(subject_id, "ace:delegation:1", {"credential": credential})  # hand it to its subject
+# the subject publishes it: ext={"ace:delegation:1": {"credentials": [credential]}}
+net.verify_delegation(credential)  # anyone: looks the issuer up, pins it, checks the signature
+```
+
+A credential grants no execution, payment or communication right.
 
 ## Commerce
 
@@ -114,7 +132,7 @@ class Agent:
         self.id = self.identity.get_ace_id()
         self.store, self.vault = MemoryStore(), PrekeyVault()
         self.peers = PeerStore(self.store)
-        self.outbox = Outbox(self.identity, self.store, Profiles())
+        self.outbox = Outbox(self.identity, self.store, Profiles(), vault=self.vault)
         self.inbox = Inbox.open(
             self.identity,
             self.store,

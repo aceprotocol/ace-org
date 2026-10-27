@@ -6,13 +6,13 @@ ACE, the **Agent Commerce Engine**, is an open protocol for three things agents 
 2. **Private communication**: end-to-end encrypted, signed packets that reach an agent even while it is offline.
 3. **A basic economic vocabulary**: shared message types for quotes, invoices, payment proofs and delivery.
 
-ACE lets an agent state what it wants reliably, learn which interaction rules a peer supports and exchange information securely. **Who to talk to, what to negotiate and whether to cooperate or pay are decisions for agents and applications.** No ACE object authorizes execution or payment. ACE is pre-release: the format may change before the first release, and independent cryptographic review is still open.
+ACE lets an agent state what it wants reliably, learn which interaction rules a peer supports and exchange information securely. **Who to talk to, what to negotiate and whether to cooperate or pay are decisions for agents and applications.** No ACE object authorizes execution or payment. Version 1 is released: a change to its wire formats is a new version.
 
 ## Identity
 
 Each agent has a **key event log** (KEL): an ML-DSA-65 root key signs an inception event that commits to the digest of the next root (pre-rotation) and delegates an ML-DSA-65 signing key. The **ACE ID** is `ace:sha256:<hex SHA-256 of the inception event>`. Rotating the root or the signing key appends events; peers pin the log and accept only extensions of it, or a recovery by the holder of the committed next root. No blockchain, wallet, vendor or hardware is required. See [Identity](/docs/identity).
 
-An agent publishes a **descriptor**: a signed, short-lived (at most 24 hours) document naming its relays, its current X-Wing prekey, its enabled profiles, visibility, an optional handle and a small card. Two optional members bind it to other identities: **Delegation credentials** and **ERC-8004 bindings** (below). The descriptor is self-asserted: it proves who wrote a claim, not that a service is good. See [Descriptor](/docs/descriptor).
+An agent publishes a **descriptor**: a signed, short-lived (at most 24 hours) document naming its relays, its current X-Wing prekey, its enabled profiles, visibility, an optional handle and a small card; a signed **card record** carries the handle, card, payment accounts and optional **ERC-8004 bindings**. Profiles can extend the descriptor, for example with **delegation credentials** (below). Both are self-asserted: it proves who wrote a claim, not that a service is good. See [Descriptor](/docs/descriptor).
 
 ## Private communication
 
@@ -37,16 +37,17 @@ A profile is a data-only manifest of message types, each with a bounded JSON sch
 | Profile | Status | Contents |
 |---|---|---|
 | `ace:text:1` | default | Plain text messages |
+| `ace:delegation:1` | official, optional | Delegation credentials published in the descriptor `ext`, plus a hand-over message. See [Delegation profile](/docs/delegation-profile). |
 | `ace:commerce:1` | official, optional | `rfq` → `offer` → `accept` → `invoice` → `payment` → `deliver` → `confirm`, plus `reject`, with a per-thread state machine. Stablecoin settlement first (`asset` as CAIP-19, `recipient`, payment proof `txHash`); Stripe Link compatible. See [Commerce profile](/docs/commerce). |
 
 A received commerce message never authorizes a payment. Whether an amount is acceptable and whether to pay is the application's decision, and payment proofs are checked independently on chain or with the payment provider.
 
-## Descriptor members: Delegation and ERC-8004
+## Delegation and ERC-8004
 
-Both are optional members of the core descriptor, not profiles:
+Both are optional and grant no authority:
 
-- **Delegation credentials** state that one identity (the issuer) declares that another (the subject) acts on its behalf, for at most seven days. They grant no execution, payment or delivery right. See [Delegation](/docs/delegation).
-- **ERC-8004 bindings** point a descriptor at an on-chain agent registry entry; the binding holds only if the on-chain registration also names the ACE ID. See [ERC-8004](/docs/erc-8004).
+- **Delegation credentials** (profile `ace:delegation:1`) state that one identity (the issuer) declares that another (the subject) acts on its behalf, for at most seven days. The subject publishes them in its descriptor `ext`; a peer verifies one against the issuer's live descriptor. They grant no execution, payment or delivery right. See [Delegation](/docs/delegation).
+- **ERC-8004 bindings** are card record members next to `pay`: they point an identity at an on-chain agent registry entry, and like `pay` they are claimed, not proven. The binding holds only if the on-chain registration also names the ACE ID. See [ERC-8004](/docs/erc-8004).
 
 ## Applications
 

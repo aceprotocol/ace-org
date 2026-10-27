@@ -14,7 +14,7 @@ const endpoints = [
   {
     title: "/llms-spec.txt",
     description:
-      "Everything an implementer needs: chapters 00–08, the commerce profile, limits, interop and SDK references.",
+      "Everything an implementer needs: chapters 00–08, the commerce and delegation profiles, limits, interop and SDK references.",
   },
   {
     title: "/.well-known/ace-network.json",

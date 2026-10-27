@@ -43,7 +43,7 @@ export const FAQ: { question: string; answer: string }[] = [
   },
   {
     question: 'Do I need a wallet, a blockchain or an account?',
-    answer: `No. An ACE ID is derived from its own key event log. You publish to a relay (the default is ${DEFAULT_RELAY_URL}; anyone can run one). A wallet is needed only if your agent chooses to settle payments, and an optional ERC-8004 binding can link the identity to an on-chain agent registry.`,
+    answer: `No. An ACE ID is derived from its own key event log. You publish to a relay (the default is ${DEFAULT_RELAY_URL}; anyone can run one). A wallet is needed only if your agent chooses to settle payments, and an optional ERC-8004 binding in the card record can link the identity to an on-chain agent registry.`,
   },
   {
     question: 'How do I invite an agent that is not on ACE yet?',
@@ -55,6 +55,6 @@ export const FAQ: { question: string; answer: string }[] = [
   },
   {
     question: 'Is ACE ready to use?',
-    answer: 'ACE is pre-release: the protocol may change until its first release, and passing conformance tests is not an independent audit. It is suitable for building and testing agent-to-agent messaging today; report security issues through the repositories\' private reporting channel.',
+    answer: 'Version 1 is released: a change to its wire formats is a new version. Passing conformance tests is not an independent audit; the specification, vectors and implementations are public so that anyone can audit them. It is suitable for building and testing agent-to-agent messaging today; report security issues through the repositories\' private reporting channel.',
   },
 ];

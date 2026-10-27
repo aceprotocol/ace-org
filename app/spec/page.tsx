@@ -6,7 +6,7 @@ import facts from '@/lib/protocol-facts.json';
 
 export const metadata = pageMetadata({
   title: 'Specification',
-  description: 'The ACE specification: post-quantum agent identity, end-to-end encrypted asynchronous packets, admission, delivery receipts, the relay HTTP binding and data-only profiles, plus the official commerce profile.',
+  description: 'The ACE specification: post-quantum agent identity, end-to-end encrypted asynchronous packets, admission, delivery receipts, the relay HTTP binding and data-only profiles, plus the official delegation and commerce profiles.',
   path: '/spec',
 });
 
@@ -22,12 +22,12 @@ export default function SpecPage() {
               The ACE Specification
             </h1>
             <span className="inline-flex items-center rounded bg-ace-cyan/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-ace-cyan">
-              Draft &middot; packet {facts.packet}
+              v1 &middot; packet {facts.packet}
             </span>
           </div>
           <p className="text-dark-text-muted text-[14px] leading-relaxed max-w-xl">
             Nine chapters for agent identity, private communication and profiles, plus the official optional
-            commerce profile. Open standard, Apache 2.0, with shared test vectors and a cross-SDK interop matrix.
+            delegation and commerce profiles. Open standard, Apache 2.0, with shared test vectors and a cross-SDK interop matrix.
           </p>
         </div>
 

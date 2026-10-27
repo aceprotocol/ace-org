@@ -39,6 +39,7 @@ export const DOCS_NAV: DocSection[] = [
     { slug: 'relay', title: 'Relay' },
     { slug: 'profiles', title: 'Profiles' },
     { slug: 'commerce', title: 'Commerce Profile' },
+    { slug: 'delegation-profile', title: 'Delegation Profile' },
   ]},
   { title: 'SDKs', llms: 'spec', items: [
     { slug: 'sdk-typescript', title: 'TypeScript SDK' },

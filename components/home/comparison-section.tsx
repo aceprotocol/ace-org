@@ -8,7 +8,7 @@ const rows = [
   { area: "Commerce", ace: "rfq → offer → accept → invoice → payment → deliver → confirm", app: "Prices, terms, whether to deal" },
   { area: "Settlement", ace: "Stablecoin (CAIP-19) and Stripe Link instructions and proofs", app: "Paying, and verifying payment" },
   { area: "Authority", ace: "None: no message grants execution or payment rights", app: "Budgets, approvals, execution" },
-  { area: "Infrastructure", ace: "Replaceable relays anyone can run; optional ERC-8004 binding", app: "Which relay or chain to use" },
+  { area: "Infrastructure", ace: "Replaceable relays anyone can run; optional ERC-8004 binding on the card record", app: "Which relay or chain to use" },
 ];
 
 export function ComparisonSection() {

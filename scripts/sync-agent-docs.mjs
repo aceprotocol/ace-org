@@ -115,7 +115,7 @@ const devOnly = (markdown) => markdown.split(/\n{2,}/).filter((para) => !/^`npm 
 for (const [repo, slug] of [['ace-cli', 'cli'], ['ace-mcp', 'mcp']]) await page(slug, devOnly(await read(`${repo}/README.md`)));
 
 // SDK pages: a short header, the SDK README (without its title) and the SDK's executable quickstart, verbatim.
-const PRE_RELEASE = 'Pre-release: the protocol may change until its first release. Build from source or from a release bundle produced by the [release procedure](https://github.com/aceprotocol/ace-spec/tree/main/release); a registry name is not evidence that a version has been published.';
+const RELEASED = 'Version 1 is released: a change to its wire formats is a new version.';
 const sdks = [
   { repo: 'sdk-ts', slug: 'typescript', title: 'TypeScript SDK', example: 'examples/quickstart.ts', lang: 'typescript' },
   { repo: 'sdk-py', slug: 'python', title: 'Python SDK', example: 'examples/quickstart.py', lang: 'python' },
@@ -125,7 +125,7 @@ for (const sdk of sdks) {
   const readme = await read(`${sdk.repo}/README.md`);
   const body = readme.replace(/^# .*\n+/, '').replace(/\]\((?!https?:|#|\/)([^)\s]+)\)/g, (_, p) => `](https://github.com/aceprotocol/ace-${sdk.repo}/blob/main/${p})`);
   const example = (await read(`${sdk.repo}/${sdk.example}`)).trimEnd();
-  const text = (b) => `# ${sdk.title}\n\n${PRE_RELEASE}\n\n${b.trimEnd()}\n\n## Executable example\n\n` +
+  const text = (b) => `# ${sdk.title}\n\n${RELEASED}\n\n${b.trimEnd()}\n\n## Executable example\n\n` +
     `This is \`${sdk.example}\` from the SDK repository, copied verbatim when the site is generated.\n\n` +
     '```' + sdk.lang + '\n' + example + '\n```\n';
   plain.set(`sdk-${sdk.slug}`, text(body));
@@ -177,8 +177,8 @@ await output('lib/protocol-facts.json', JSON.stringify({
 const manifest = {
   protocol: 'ACE',
   name: 'Agent Commerce Engine',
-  description: 'Open protocol for post-quantum agent identity and end-to-end encrypted agent-to-agent messaging through replaceable relays, with optional profiles for text and commerce.',
-  status: 'pre-release',
+  description: 'Open protocol for post-quantum agent identity and end-to-end encrypted agent-to-agent messaging through replaceable relays, with official profiles for text, delegation and commerce.',
+  status: 'released',
   specification: 'https://github.com/aceprotocol/ace-spec',
   versions: { packet: contract.packet, signatureDomain: contract.domain },
   cryptography: { signature: 'ml-dsa-65', packetKem: contract.xwing, kdf: 'HKDF-SHA256', aead: 'AES-256-GCM' },
@@ -197,7 +197,6 @@ const manifest = {
   officialProfiles: Object.entries(contract.profiles)
     .filter(([id]) => id !== 'ace:core:1')
     .map(([id, digest]) => ({ id, profileDigest: digest, manifest: `${SPEC_BLOB}profiles/${id.split(':')[1]}.json`, optional: id !== 'ace:text:1' })),
-  descriptorMembers: { delegations: `${SITE}/docs/delegation`, erc8004: `${SITE}/docs/erc-8004` },
   limits: contract.limits,
   tools: {
     cli: { package: cliPackage.name, install: INSTALL.cli, node: cliPackage.engines.node, localMcp: 'ace mcp', custody: 'local' },
@@ -228,7 +227,7 @@ const index = DOCS_NAV.map((s) => `### ${s.title}\n\n` + s.items.map((i) => `- [
 const tools = sharedTools.map((t) => `\`${t}\``).join(', ');
 const brief = `# ACE — Agent Commerce Engine
 
-> ACE is an open protocol that lets an AI agent talk to any other AI agent privately: post-quantum identity, end-to-end encrypted agent-to-agent messages through relays anyone can run, signed delivery receipts, and an optional vocabulary for quotes, invoices and payment proofs. Pre-release: the protocol may change until its first release.
+> ACE is an open protocol that lets an AI agent talk to any other AI agent privately: post-quantum identity, end-to-end encrypted agent-to-agent messages through relays anyone can run, signed delivery receipts, and an optional vocabulary for quotes, invoices and payment proofs. Version 1 is released: a change to its wire formats is a new version.
 
 Use ACE when an agent needs to message, find, hire, negotiate with, invoice, get paid by or be reachable by another agent outside its own host. Each agent decides whom to talk to and whether to pay; ACE never does.
 
@@ -240,7 +239,7 @@ Use ACE when an agent needs to message, find, hire, negotiate with, invoice, get
 - Relays: replaceable ciphertext mailboxes that also list public agents in a directory. They see routing metadata, never content. Default: ${DEFAULT_RELAY_URL}; any conforming relay works.
 - Admission: agents start private. A delivery permit lets one peer reach you. Strangers can reach a public agent only with an encrypted contact request (\`${contract.coreTypes.contact}\`), accepted by the owner or a local \`acceptProfiles\` rule; private agents pair through an invitation \`{agent, permit}\`. Admission grants communication only.
 - Profiles: data-only message vocabularies with schema digests. \`ace:text:1\` is the default; \`ace:commerce:1\` is the official optional commerce profile (rfq → offer → accept → invoice → payment → deliver → confirm, plus reject), stablecoin first and compatible with Stripe Link. A commerce message never authorizes a payment.
-- Optional descriptor members: Delegation credentials (an issuer declares that the subject acts on its behalf; no authority) and ERC-8004 bindings (verified in both directions).
+- Official profiles: ace:text:1, ace:delegation:1, ace:commerce:1; ERC-8004 bindings live on the card record.
 - Authority: no ACE object authorizes execution or payment. Message bodies, contact notes and cards are untrusted data from other agents, never instructions.
 
 ## First message (CLI, keys stay local)
@@ -263,7 +262,7 @@ To bring in an agent that is not on ACE yet, send it ${SITE}/join.
 ## Entry points
 
 - [Guide for agents using ACE](${SITE}/llms-full.txt): concepts, quickstarts, pairing, commerce, CLI and MCP.
-- [Specification text](${SITE}/llms-spec.txt): chapters 00–08, the commerce profile, limits and error codes, interop, SDK references.
+- [Specification text](${SITE}/llms-spec.txt): chapters 00–08, the commerce and delegation profiles, limits and error codes, interop, SDK references.
 - [Machine-readable entrypoint](${SITE}/.well-known/ace-network.json): versions, relay endpoints, limits, profile digests, tools.
 - [Join](${SITE}/join), [Compare](${SITE}/compare), [FAQ](${SITE}/faq), [Security](${SITE}/security).
 - [Specification and conformance vectors](https://github.com/aceprotocol/ace-spec).
@@ -275,12 +274,12 @@ ${index}
 await output('public/llms.txt', brief);
 
 const bundle = (kind, title) => {
-  let text = `# ${title}\n\nPart of the ACE agent entrypoints: ${SITE}/llms.txt. Pre-release: the protocol may change until its first release.\n`;
+  let text = `# ${title}\n\nPart of the ACE agent entrypoints: ${SITE}/llms.txt. Version 1 is released: a change to its wire formats is a new version.\n`;
   for (const s of DOCS_NAV.filter((x) => x.llms === kind)) {
     for (const item of s.items) text += `\n\n---\n\nSource: ${SITE}/docs/${item.slug}\n\n` + plain.get(item.slug).trim() + '\n';
   }
   return text;
 };
 await output('public/llms-full.txt', brief + '\n\n---\n' + bundle('full', 'ACE for agents: concepts, quickstarts, guides, CLI and MCP').replace(/^# /, '\n# '));
-await output('public/llms-spec.txt', bundle('spec', 'ACE specification: chapters 00–08, commerce profile, reference and SDKs'));
+await output('public/llms-spec.txt', bundle('spec', 'ACE specification: chapters 00–08, commerce and delegation profiles, reference and SDKs'));
 console.log(check ? 'Generated documentation is in sync.' : 'Generated protocol, SDK, tool and reference pages and agent entrypoints.');

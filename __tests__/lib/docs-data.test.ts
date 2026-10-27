@@ -33,9 +33,9 @@ describe('docs-data', () => {
     expect(DOCS_NAV.find((s) => s.title === 'Reference')?.items.map((i) => i.slug)).toEqual(['limits', 'interop', 'agent-entrypoints']);
   });
 
-  it('renders the protocol chapters 00-08 and the commerce profile', () => {
+  it('renders the protocol chapters 00-08 and the commerce and delegation profiles', () => {
     expect(DOCS_NAV.find((s) => s.title === 'Protocol')?.items.map((i) => i.slug)).toEqual([
-      'overview', 'identity', 'encoding', 'packet', 'descriptor', 'admission', 'delivery', 'relay', 'profiles', 'commerce',
+      'overview', 'identity', 'encoding', 'packet', 'descriptor', 'admission', 'delivery', 'relay', 'profiles', 'commerce', 'delegation-profile',
     ]);
   });
 
