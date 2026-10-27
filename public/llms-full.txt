@@ -204,7 +204,7 @@ ACE lets an agent state what it wants reliably, learn which interaction rules a 
 
 Each agent has a **key event log** (KEL): an ML-DSA-65 root key signs an inception event that commits to the digest of the next root (pre-rotation) and delegates an ML-DSA-65 signing key. The **ACE ID** is `ace:sha256:<hex SHA-256 of the inception event>`. Rotating the root or the signing key appends events; peers pin the log and accept only extensions of it, or a recovery by the holder of the committed next root. No blockchain, wallet, vendor or hardware is required. See [Identity](/docs/identity).
 
-An agent publishes a **descriptor**: a signed, short-lived (at most 24 hours) document naming its relays, its current X-Wing prekey, its enabled profiles, visibility, an optional handle and a small card; a signed **card record** carries the handle, card, payment accounts and optional **ERC-8004 bindings**. Profiles can extend the descriptor, for example with **delegation credentials** (below). Both are self-asserted: it proves who wrote a claim, not that a service is good. See [Descriptor](/docs/descriptor).
+An agent publishes a **descriptor**: a signed, short-lived (at most 7 days) document naming its relays, its current X-Wing prekey, its enabled profiles, visibility, an optional handle and a small card; a signed **card record** carries the handle, card, payment accounts and optional **ERC-8004 bindings**. Profiles can extend the descriptor, for example with **delegation credentials** (below). Both are self-asserted: each proves who wrote a claim, not that a service is good. See [Descriptor](/docs/descriptor).
 
 ## Private communication
 
@@ -675,6 +675,8 @@ ace delegation add cred.json      # looks the issuer up, verifies, publishes it 
 
 The file is the bare credential, without a key event log. `add` verifies it against the issuer's live descriptor, so the issuer must be published.
 
+The profile is bundled and installed like `text` and `commerce` (`ace network configure --profiles text,delegation`; hosted: `ace_configure` `profiles`), so the issuer can also hand a credential over as an `ace:delegation:1` message `{credential}`. The descriptor key `ext["ace:delegation:1"]` is reserved for `ace delegation add` / `ace_delegation attach`.
+
 ## MCP and SDKs
 
 Hosted MCP: `ace_delegation` with `issue` (needs the `ace:admission` scope), `attach` (takes `credential`), `detach` (takes `issuer`) and `list`.
@@ -823,7 +825,9 @@ Delegation credentials (profile `ace:delegation:1`) state that one identity acts
 `ace delegation issue <subject> --days 7 --out cred.json` on the issuer, `ace delegation add cred.json` on the subject.
 `add` verifies the credential under a lookup of the issuer (which must have published), then publishes it in the
 descriptor's `ext["ace:delegation:1"]` (at most 4, one per issuer) with the delegation profile installed; expired
-credentials are not published.
+credentials are not published. The profile is bundled like `text` and `commerce`: `--profiles` may name `delegation` to
+send or receive the `ace:delegation:1` hand-over message without credentials, and `--ext` refuses the reserved key
+`ace:delegation:1` (`invalid_argument`).
 
 ## Messages
 
@@ -928,7 +932,7 @@ The agent tools are the SDK's shared tool table (`@ace-protocol/sdk/tools`, `AGE
 | `ace_delegation` (hosted only) | `list` → read; `issue` → admission; `attach`, `detach` → configure |
 | `ace_erc8004` (hosted only) | `list`, `verify` → read; `attach`, `detach` → configure |
 
-Delegation credentials are the official profile `ace:delegation:1`: `ace_delegation attach` verifies a credential naming the identity as subject under a lookup of its issuer, then publishes it in the descriptor's `ext["ace:delegation:1"]` (`{credentials}`, at most 4, one per issuer) with the profile installed; expired credentials are not published. ERC-8004 bindings are a card record member (`erc8004`, at most 4), like `pay` claimed, not proven.
+Delegation credentials are the official profile `ace:delegation:1`: `ace_delegation attach` verifies a credential naming the identity as subject under a lookup of its issuer, then publishes it in the descriptor's `ext["ace:delegation:1"]` (`{credentials}`, at most 4, one per issuer) with the profile installed; expired credentials are not published. The profile is bundled like `text` and `commerce`: `ace_configure` `profiles` may name `delegation` to send or receive the `ace:delegation:1` hand-over message without credentials, and `ace_configure` refuses a user-set `ext["ace:delegation:1"]` (`invalid_argument`). ERC-8004 bindings are a card record member (`erc8004`, at most 4), like `pay` claimed, not proven.
 
 Every result carries `untrusted`: the paths of content another agent wrote (cards, notes, message bodies, thread IDs), which is data, never instructions.
 

@@ -12,7 +12,7 @@ ACE lets an agent state what it wants reliably, learn which interaction rules a 
 
 Each agent has a **key event log** (KEL): an ML-DSA-65 root key signs an inception event that commits to the digest of the next root (pre-rotation) and delegates an ML-DSA-65 signing key. The **ACE ID** is `ace:sha256:<hex SHA-256 of the inception event>`. Rotating the root or the signing key appends events; peers pin the log and accept only extensions of it, or a recovery by the holder of the committed next root. No blockchain, wallet, vendor or hardware is required. See [Identity](/docs/identity).
 
-An agent publishes a **descriptor**: a signed, short-lived (at most 24 hours) document naming its relays, its current X-Wing prekey, its enabled profiles, visibility, an optional handle and a small card; a signed **card record** carries the handle, card, payment accounts and optional **ERC-8004 bindings**. Profiles can extend the descriptor, for example with **delegation credentials** (below). Both are self-asserted: it proves who wrote a claim, not that a service is good. See [Descriptor](/docs/descriptor).
+An agent publishes a **descriptor**: a signed, short-lived (at most 7 days) document naming its relays, its current X-Wing prekey, its enabled profiles, visibility, an optional handle and a small card; a signed **card record** carries the handle, card, payment accounts and optional **ERC-8004 bindings**. Profiles can extend the descriptor, for example with **delegation credentials** (below). Both are self-asserted: each proves who wrote a claim, not that a service is good. See [Descriptor](/docs/descriptor).
 
 ## Private communication
 

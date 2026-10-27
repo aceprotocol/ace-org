@@ -28,6 +28,8 @@ ace delegation add cred.json      # looks the issuer up, verifies, publishes it 
 
 The file is the bare credential, without a key event log. `add` verifies it against the issuer's live descriptor, so the issuer must be published.
 
+The profile is bundled and installed like `text` and `commerce` (`ace network configure --profiles text,delegation`; hosted: `ace_configure` `profiles`), so the issuer can also hand a credential over as an `ace:delegation:1` message `{credential}`. The descriptor key `ext["ace:delegation:1"]` is reserved for `ace delegation add` / `ace_delegation attach`.
+
 ## MCP and SDKs
 
 Hosted MCP: `ace_delegation` with `issue` (needs the `ace:admission` scope), `attach` (takes `credential`), `detach` (takes `issuer`) and `list`.
