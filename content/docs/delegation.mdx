@@ -10,11 +10,7 @@ It grants nothing. A credential carries no execution, payment or communication r
 { "issuer": "ace:sha256:…", "subject": "ace:sha256:…", "issuedAt": 1760140800, "expiresAt": 1760745600, "signature": { "scheme": "ml-dsa-65", "seq": 1, "value": "…" } }
 ```
 
-The issuer signs with its current ML-DSA-65 signing key (action `ace:delegation:1`). The subject publishes up to four credentials, one per issuer, in its descriptor extension `ext["ace:delegation:1"] = {credentials}`. Descriptor verification checks only their shape; it never checks a credential signature.
-
-## Verifying
-
-A peer that needs to know whether the subject acts for the issuer looks the issuer up, pins its key event log from its live descriptor, then requires `now < expiresAt` and the signature to verify under that pin. A lookup failure is reported as that failure (for example `unknown_peer`), never as "not delegated". When the issuer's pin changes, the credential is verified again.
+The issuer signs with its current ML-DSA-65 signing key (action `ace:delegation:1`). The subject publishes up to four credentials, one per issuer, in its descriptor extension `ext["ace:delegation:1"] = {credentials}`. A peer verifies a credential itself, against its own lookup of the issuer: [Delegation profile](/docs/delegation-profile).
 
 ## With the CLI
 
@@ -26,20 +22,12 @@ ace delegation issue <subject-ace-id> --days 7 --out cred.json
 ace delegation add cred.json      # looks the issuer up, verifies, publishes it in the descriptor ext
 ```
 
-The file is the bare credential, without a key event log. `add` verifies it against the issuer's live descriptor, so the issuer must be published.
-
-The profile is bundled and installed like `text` and `commerce` (`ace network configure --profiles text,delegation`; hosted: `ace_configure` `profiles`), so the issuer can also hand a credential over as an `ace:delegation:1` message `{credential}`. The descriptor key `ext["ace:delegation:1"]` is reserved for `ace delegation add` / `ace_delegation attach`.
+The file is the bare credential, without a key event log; the issuer must be published. With `delegation` in both sides' profiles (`ace network configure --profiles text,delegation`; hosted: `ace_configure` `profiles`), the issuer can also hand it over as an `ace:delegation:1` message `{credential}`.
 
 ## MCP and SDKs
 
 Hosted MCP: `ace_delegation` with `issue` (needs the `ace:admission` scope), `attach` (takes `credential`), `detach` (takes `issuer`) and `list`.
 
-| | TypeScript | Python | Swift |
-|---|---|---|---|
-| Issue | `createDelegationCredential` | `create_delegation_credential` | `createDelegationCredential(issuer:subject:now:ttl:)` |
-| Check a descriptor extension (shape only) | `validateDelegationExt` | `validate_delegation_ext` | `validateDelegationExt(_:subject:now:)` |
-| Verify against a pinned issuer | `verifyDelegationCredential` | `verify_delegation_credential` | `verifyDelegationCredential(_:issuer:now:)` |
-| Look the issuer up and verify | `NetworkClient.verifyDelegation` | `NetworkClient.verify_delegation` | `NetworkClient.verifyDelegation(_:)` |
-| Message rule | `delegationRules` | `delegation_rules` | `delegationRules(peers:localAceId:)` |
+SDK functions: [TypeScript](/docs/sdk-typescript), [Python](/docs/sdk-python) and [Swift](/docs/sdk-swift) SDK references.
 
-The TypeScript SDK exports the profile ID as `DELEGATION_PROFILE_ID`. The words *controller* (issuer) and *delegate* (subject) are informal; the protocol has no role enumeration.
+The words *controller* (issuer) and *delegate* (subject) are informal; the protocol has no role enumeration.

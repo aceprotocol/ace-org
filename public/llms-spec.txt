@@ -377,7 +377,7 @@ Normative reference: `draft-connolly-cfrg-xwing-kem-11` (this exact revision).
 | Ciphertext | `ct_M[1088] ‖ ct_X[32]`, 1120 bytes |
 | Shared secret | `SHA3-256(ss_M ‖ ss_X ‖ ct_X ‖ pk_X ‖ 0x5c2e2f2f5e5c)`, 32 bytes |
 
-Implementations MUST NOT add separate X25519 small-order or all-zero checks beyond what the draft specifies. An implementation MUST reproduce the draft's test vectors.
+Implementations MUST NOT add separate X25519 small-order or all-zero checks beyond what the draft specifies. Where the X25519 primitive itself refuses an all-zero output (common libraries do, with no way around it), the operation fails: `Encapsulate` as `invalid_argument` at the sender, `Decapsulate` as `decryption_failed` at the receiver ([06](/docs/delivery#receive-pipeline) step 6). A low-order value comes only from the party that supplied the key or the ciphertext, so either outcome affects only packets to or from that party. An implementation MUST reproduce the draft's test vectors.
 
 ## Signature
 
@@ -466,7 +466,7 @@ Besides its published prekey, an endpoint offers each peer a **peer prekey**: an
 **Holder.** The holder keeps at most one key per peer.
 
 - A packet that opened (step 6) and whose sender is pinned, at step 3 or by the recovery path ([05](/docs/admission#admission-recovery)), records its `prekey` as the held key for `from` when the packet's `timestamp` is greater than the held key's, bound to the pin state (the digest of the last pinned KEL event) it was authenticated under; duplicates at step 9 record too. A contact packet, and any packet whose sender has no pin when it is processed, records nothing.
-- The held key is used only while the peer's pin is the one it is bound to and less than `OFFLINE_WINDOW_SECONDS` have passed since the timestamp of the packet that carried it. It is dropped when the peer is blocked and when a receipt `rejected:unknown_prekey` names it.
+- The held key is used only while the peer's pin is the one it is bound to and less than `OFFLINE_WINDOW_SECONDS` have passed since the timestamp of the packet that carried it. It is dropped when the peer is blocked, when a receipt `rejected:unknown_prekey` names it, and when encapsulating to it fails ([03](/docs/packet#x-wing)); that attempt then encrypts to the published prekey.
 
 ## Card record
 
@@ -1192,8 +1192,6 @@ Source: https://aceprotocol.org/docs/sdk-typescript
 
 # TypeScript SDK
 
-Version 1 is released: a change to its wire formats is a new version.
-
 TypeScript SDK for the **ACE Protocol**: post-quantum agent identity, asynchronous end-to-end encrypted packets and
 profile-based interaction vocabularies. ACE lets agents express intent reliably, learn which interaction rules a peer
 supports, and exchange information safely. Who to work with, what to agree and whether to pay or execute anything are
@@ -1209,7 +1207,8 @@ Spec: `ace-spec` chapters 00–08 (packet version `"1"`). Every signature is ML-
 - **Prekeys** — `PrekeyVault` (`current`, `rotate`, `open`, `prune`): X-Wing prekeys published in the descriptor,
   superseded seeds retained for `OFFLINE_WINDOW_SECONDS` (at most 16). `StorePrekeyVault` persists them in an
   `ACEStore` (a 0600 file with `FileStore`, a `MemoryStore` for ephemeral agents; optional `protect` sealing hook).
-- **Packet** — `createPacket`, `decodePacket`, `verifyPacketSignature`, `decryptPacket`: X-Wing → HKDF-SHA256 (empty
+- **Packet** — `createPacket`, `decodePacket`, `verifyPacketSignature`, `decryptPacket` (the content bytes) and
+  `decodePrivateContent`: X-Wing → HKDF-SHA256 (empty
   salt, info = header binding `from`, `to`, `messageId`, `timestamp`, prekey and KEM ciphertext) → AES-256-GCM, signed
   with ML-DSA-65 (action `packet`). The recipient need not be online.
 - **Card record** — `createCardRecord` / `verifyCardBundle`: the durable identity record `{kel, card}` with its home
@@ -1342,8 +1341,6 @@ Source: https://aceprotocol.org/docs/sdk-python
 
 # Python SDK
 
-Version 1 is released: a change to its wire formats is a new version.
-
 Python reference SDK for the ACE protocol: post-quantum agent identity (ML-DSA key event logs),
 private asynchronous packets (X-Wing prekeys + AES-256-GCM, ML-DSA signatures), signed receipts,
 admission (permits, contact requests, blocks) and data-only profile manifests.
@@ -1363,13 +1360,13 @@ pip install ace-sdk
 |---|---|
 | Identity | `SoftwareIdentity.generate/from_export/recover`, `.rotate()`, `.delegate()`, `verify_kel`, `extend_kel` |
 | Prekeys | `PrekeyVault()` (memory) / `PrekeyVault(path)` (0600 file): `current()`, `rotate(now)`, `open(id)`, `prune(now)` |
-| Packets | `encode_content`, `create_packet`, `decode_packet`, `verify_packet`, `decrypt_packet` |
+| Packets | `encode_content`, `create_packet`, `decode_packet`, `verify_packet`, `decrypt_packet` (the content bytes), `decode_content` |
 | Descriptors | `create_published_agent`, `verify_published_agent` -> `VerifiedAgent` |
 | Card records | `create_card_record` (`pay`, `erc8004`), `verify_card_bundle` -> `VerifiedCard`, `is_caip10_account`, `validate_erc8004`, `verify_erc8004_registration(json, ace_id)`; `RelayClient.publish_card/card/handle`; `NetworkClient.lookup_card/lookup_with_card` (descriptor first: no live descriptor, no card) |
 | Admission | `create_permit`, `verify_permit`, `PeerStore` (pins, `pending/admitted/blocked`, permits); `NetworkClient.create_invitation/import_invitation` |
 | Delivery | `Outbox` (persist, re-encrypt per attempt, backoff 60 s→1 h, expiry after 7 days, `prune`), `Inbox.open` (receive pipeline, receipts, quarantine) |
 | Profiles | `Profiles([TEXT, DELEGATION, COMMERCE, ProfileManifest(custom)])`; core (`ace:receipt:1`, `ace:contact:1`) is always installed |
-| Rules | `ProfileRules` (`types`, `check(event, body)`, `commit(event, body)`; send-side `commit` on the `delivered` receipt, `thread_busy` while a governed message is in flight); optional `commerce_rules(store, ace_id)`, `delegation_rules(peers, ace_id)` |
+| Rules | `ProfileRules` (`types`, `check(event, body)`, `commit(event, body)`; send-side `commit` on the `delivered` receipt, `thread_busy` while a governed message is in flight); optional `commerce_rules(store, ace_id)`, `delegation_rules(peers)` |
 | Delegation | `ace:delegation:1`: `create_delegation_credential`, `validate_delegation_ext`, `verify_delegation_credential`, `NetworkClient.verify_delegation` (pins the issuer) |
 | Network | `RelayClient` (SSRF-safe; `allow_loopback=True` only for local development), `NetworkClient.open`; optional wake hints `set_wake(gateway, token)` / `clear_wake()` (07 § Wake hints) |
 | Relay auth | `create_auth_headers`, `create_registration_request` (relay-side verification lives in the relay) |
@@ -1517,8 +1514,6 @@ Source: https://aceprotocol.org/docs/sdk-swift
 
 # Swift SDK
 
-Version 1 is released: a change to its wire formats is a new version.
-
 Swift implementation of the [ACE Protocol](https://aceprotocol.org) (packet `"1"`): post-quantum identities on a key event
 log, asynchronous prekey-encrypted packets, signed descriptors, receipts, admission and data-only profiles. ACE lets agents
 state intent, see which interaction rules a peer supports and exchange information securely. Who to work with, what to
@@ -1536,13 +1531,13 @@ One library product, `ACE`. No binary or chain dependencies (CryptoKit only).
 |---|---|
 | Identity | `SoftwareIdentity`, `SecureEnclaveIdentity` (an `ml-dsa-65` root, a committed next root, one delegated `ml-dsa-65` signing key), `ACEKel`, `checkUsable`; exports hold no encryption seed (`jsonData()` / `init(json:)`) |
 | Prekeys | `PrekeyVault` (`current`, `rotate(now:)`, `open(_:sender:now:)`, `prune(now:)`; peer prekeys: `offer`, `used`, `hold`, `held`, `dropHeld`), `StorePrekeyVault(store:protection:)` over `MemoryStore` / `FileStore`, `.secureEnclave` seals seeds (published and peer) with Secure Enclave ML-KEM |
-| Packet | `createPacket`, `Packet(json:)`, `verifyPacketSignature`, `decryptPacket`, `PrivateContent`, `conversationKey` |
+| Packet | `createPacket`, `Packet(json:)`, `verifyPacketSignature`, `decryptPacket(_:vault:now:)` (the content bytes), `PrivateContent(json:)`, `conversationKey` |
 | Documents | `createPublishedAgent` / `verifyPublishedAgent` (`DescriptorClaims`), `createCardRecord` / `verifyCardBundle` (`CardRecord`, `AgentCard`, `Contact`; `pay` and `erc8004` with `ERC8004Binding`, `verifyErc8004Registration`), `createPermit` / `verifyPermit` (30 days) |
 | Profiles | `ProfileManifest` (`.core`, `.text`, `.delegation`, `.commerce`, bundled as resources byte-identical to `ace-spec/profiles`), `InstalledProfiles`, `ProfileRules` |
 | Network | `NetworkClient.open(...)`: `publish(force:)` (registers on demand), `discover(tag:profile:cursor:limit:)` (`GET /v1/cards`: the home relay's listed card records, each verified on its own; `lookup` an entry's ACE ID before connecting), `importAgent`, `lookup(_:)` (ACE ID or `@name@relay`; a typed handle may omit the leading `@` and use any ASCII case), `lookupWithCard(_:)` (`lookup` plus the verified card record, nil when it has none), `lookupCard(_:)` (looks the descriptor up first: no live descriptor, no card), `agent(_:refresh:)`, `verifyDelegation(_:)` (pins the issuer, then verifies an `ace:delegation:1` credential), `connect(_:profile:note:)`, `requests()` (pending `ContactRequest`s), `accept`, `reject`, `block`, `unblock`, `setWake(gateway:token:)` / `clearWake()` (07 § Wake hints, optional), `createInvitation(peer:profile:)` / `importInvitation` (`Invitation` = `{agent, permit}`), `send(to:type:body:threadId:)`, `flush()`, `pull(limit:maxPages:)` (`maxPages` bounds one pass), `follow()`, `maintain()`, `close()`; `onMessage` / `onReceipt` in `NetworkConfiguration` |
 | Relay | `RelayClient` (07 binding, client side) and `RelayClient.foreign(_:)`, the default client for relays named by peers (https only, blocked addresses refused) |
 | State | `ACEStore` (`MemoryStore`, `FileStore`; `validateStoreKey` / `validateStoreValue` / `validateLockName`, `NamedMutexes` and `lockTimeoutError` for a custom store), `PeerStore`, `AdmissionTable`, `Outbox` (re-encrypt per attempt, backoff, persisted lease, receipts) |
-| Optional | `commerceRules(store:localAceId:)` + `ThreadStore` for `ace:commerce:1` (stablecoin / Stripe Link settlement shapes); `ace:delegation:1`: `createDelegationCredential`, `validateDelegationExt`, `verifyDelegationCredential`, `delegationRules(peers:localAceId:)` (installed by `NetworkClient` with `.delegation`; credentials go in `ext["ace:delegation:1"] = {credentials}`) |
+| Optional | `commerceRules(store:localAceId:)` + `ThreadStore` for `ace:commerce:1` (stablecoin / Stripe Link settlement shapes); `ace:delegation:1`: `createDelegationCredential`, `validateDelegationExt`, `verifyDelegationCredential`, `delegationRules(peers:)` (installed by `NetworkClient` with `.delegation`; credentials go in `ext["ace:delegation:1"] = {credentials}`) |
 | Other | `createAuthHeaders`, `createRegistrationRequest`, one error type `ACEError` |
 
 Relay-side verification (auth headers, registration requests) is provided by the TypeScript SDK only.
@@ -1630,7 +1625,7 @@ let packet = try createPacket(sender: alice, to: verifiedBob.aceId, prekey: veri
 let received = try Packet(json: packet.jsonData())
 let aliceKel = try ACEKel.verify(alice.getKel(), now: systemClock())
 try verifyPacketSignature(received, sender: aliceKel, now: systemClock())
-let opened = try decryptPacket(received, seed: try bobPrekeys.open(received.encryption.prekey, now: systemClock())!)
+let opened = try PrivateContent(json: try decryptPacket(received, vault: bobPrekeys, now: systemClock()))
 try text.validate(opened)
 print(opened.type, opened.body["message"]?.stringValue ?? "")
 

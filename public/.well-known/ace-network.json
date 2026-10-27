@@ -116,9 +116,12 @@
     "offlineWindowSeconds": 604800
   },
   "admission": {
-    "defaultVisibility": "private",
-    "strangers": "ace:contact:1 contact request to a public agent",
-    "privatePeers": "invitation {agent, permit} shared out of band"
+    "defaults": {
+      "contact": "closed",
+      "listed": false
+    },
+    "strangers": "ace:contact:1 contact request to an agent whose card record has contact: open",
+    "closedPeers": "invitation {agent, permit} shared out of band"
   },
   "coreTypes": {
     "receipt": "ace:receipt:1",

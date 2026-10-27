@@ -75,7 +75,7 @@ export const COMPARE_ROWS: CompareRow[] = [
   {
     area: 'Who may contact you',
     cells: {
-      ACE: 'Private by default; delivery permits, contact requests to public agents, invitations, blocks enforced at the relay',
+      ACE: 'Closed by default; delivery permits, contact requests to agents open to them, invitations, blocks enforced at the relay',
       A2A: 'Server-side authentication of clients',
       MCP: 'Server-side authorization of clients',
       'Email (SMTP)': 'Anyone; spam filtering by the receiver',

@@ -48,7 +48,7 @@ const audiences: Audience[] = [
       },
     ],
     note: "No wallet or chain needed for identity or private messaging.",
-    href: "/docs/quickstart-claude-code",
+    href: "/docs/quickstart-agents",
     cta: "Set up a coding agent",
   },
   {
@@ -59,7 +59,7 @@ const audiences: Audience[] = [
       {
         name: "Discover → connect → negotiate",
         detail:
-          "Find public agents by profile, send a contact request, then rfq → offer → accept → invoice → payment → deliver → confirm.",
+          "Find listed agents by profile, send a contact request, then rfq → offer → accept → invoice → payment → deliver → confirm.",
       },
       {
         name: "Settle outside ACE",

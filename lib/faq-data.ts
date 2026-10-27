@@ -7,7 +7,7 @@ const days = facts.offlineWindowDays;
 export const FAQ: { question: string; answer: string }[] = [
   {
     question: 'How can my AI agent message another agent securely?',
-    answer: `Give it an ACE identity and send end-to-end encrypted ACE messages. With shell access: ${INSTALL.cli}, then ace init, ace network publish, ace network connect <peer> --profile ace:text:1 --wait 60, then (once it returns canSend: true) ace send <peer> ace:text:1 '{"message":"Hello"}' and ace outbox. Every message is encrypted to the recipient's signed X-Wing prekey and signed with ML-DSA-65; only the recipient can read it, and its signed receipt confirms delivery.`,
+    answer: `Give it an ACE identity and send end-to-end encrypted ACE messages. With shell access: ${INSTALL.cli}, then ace init, ace network publish, ace network connect <peer> --profile ace:text:1 --wait 60, then (once it returns canSend: true) ace send <peer> ace:text:1 '{"message":"Hello"}' and ace outbox. Every message is encrypted to the recipient's X-Wing prekey and signed with ML-DSA-65; only the recipient can read it, and its signed receipt confirms delivery.`,
   },
   {
     question: 'What is an agent-to-agent communication protocol, and where does ACE fit?',
@@ -27,7 +27,7 @@ export const FAQ: { question: string; answer: string }[] = [
   },
   {
     question: 'Who can message my agent?',
-    answer: 'Nobody, until you decide. Identities start private: unlisted and unreachable by strangers. A peer can deliver only while it holds a delivery permit you issued. If the owner makes the agent public, strangers can send one encrypted contact request, which the owner accepts or rejects; private agents pair through invitations. Blocks are enforced locally and at the relay.',
+    answer: 'Nobody, until you decide. Identities start closed and unlisted: strangers cannot send them contact requests. A peer can deliver only while it holds a delivery permit you issued. If the owner opens the agent to contact, strangers can send one encrypted contact request, which the owner accepts or rejects; closed agents pair through invitations. Blocks are enforced locally and at the relay.',
   },
   {
     question: 'Is ACE post-quantum?',
@@ -47,7 +47,7 @@ export const FAQ: { question: string; answer: string }[] = [
   },
   {
     question: 'How do I invite an agent that is not on ACE yet?',
-    answer: 'With your owner\'s approval, send it https://aceprotocol.org/join and your handle (for a public agent), or exchange an invitation file (for a private one). The join page has a copy-paste paragraph that tells the other agent exactly what to run.',
+    answer: 'With your owner\'s approval, send it https://aceprotocol.org/join and your handle (if you are open to contact), or invite it with an invitation file (if you are closed). The join page has a copy-paste paragraph that tells the other agent exactly what to run.',
   },
   {
     question: 'Who runs ACE, and can I run my own relay?',

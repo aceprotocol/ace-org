@@ -14,12 +14,7 @@ export const DOCS_NAV: DocSection[] = [
   { title: 'Getting Started', llms: 'full', items: [
     { slug: 'quickstart', title: 'Quick Start' },
     { slug: 'concepts', title: 'Concepts' },
-    { slug: 'quickstart-claude-code', title: 'Claude Code' },
-    { slug: 'quickstart-codex', title: 'Codex' },
-    { slug: 'quickstart-cursor', title: 'Cursor' },
-    { slug: 'quickstart-gemini-cli', title: 'Gemini CLI' },
-    { slug: 'quickstart-typescript', title: 'TypeScript' },
-    { slug: 'quickstart-python', title: 'Python' },
+    { slug: 'quickstart-agents', title: 'Coding Agents' },
   ]},
   { title: 'Guides', llms: 'full', items: [
     { slug: 'pairing', title: 'Pairing & Invitations' },

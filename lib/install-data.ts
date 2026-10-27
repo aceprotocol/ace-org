@@ -5,6 +5,8 @@ export const SDK_VERSION = "0.6.0";
 /** Package version of @ace-protocol/cli. */
 export const CLI_VERSION = "0.4.0";
 export const DEFAULT_RELAY_URL = "https://relay.aceprotocol.org";
+/** Host part of handle addresses at the default relay: `@name@RELAY_HOST`. */
+export const RELAY_HOST = new URL(DEFAULT_RELAY_URL).host;
 export const MCP_URL = "https://mcp.aceprotocol.org/mcp";
 
 export const INSTALL = {

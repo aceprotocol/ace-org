@@ -65,7 +65,7 @@ describe("home sections", () => {
     const { container } = render(<PillarsSection />);
     const text = container.textContent ?? "";
     expect(text).toMatch(/ACE ID is the SHA-256 of its key event log's inception event/);
-    expect(text).toMatch(/signed X-Wing prekey/);
+    expect(text).toMatch(/X-Wing prekey/);
     expect(text).toMatch(/only its signed receipt confirms delivery/);
     expect(text).toMatch(/A message never authorizes a payment/);
     expect(text).not.toMatch(/Ed25519|secp256k1/);
@@ -85,7 +85,7 @@ describe("home sections", () => {
   it("audience cards link to the three entry paths", () => {
     render(<AudiencesSection />);
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(hrefs).toEqual(["/docs/hosted-mcp", "/docs/quickstart-claude-code", "/docs/agent-commerce"]);
+    expect(hrefs).toEqual(["/docs/hosted-mcp", "/docs/quickstart-agents", "/docs/agent-commerce"]);
     expect(screen.getByText("npx skills add aceprotocol/ace-skill")).toBeInTheDocument();
     expect(screen.getByText(/custodial/)).toBeInTheDocument();
   });

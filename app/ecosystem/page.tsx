@@ -78,7 +78,7 @@ export default function EcosystemPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <SdkCard
               name="relay"
-              description="Public relay: an asynchronous mailbox for encrypted packets (inbox, ack, SSE listen), signed descriptors and the public agent directory. It sees ciphertext and routing metadata only. The default for the CLI; a replaceable service: anyone may operate a relay."
+              description="Public relay: an asynchronous mailbox for encrypted packets (inbox, ack, SSE listen), signed descriptors, card records and handles, and the public directory of listed agents. It sees ciphertext and routing metadata only. The default for the CLI; a replaceable service: anyone may operate a relay."
               installCmd={DEFAULT_RELAY_URL}
               githubUrl="https://github.com/aceprotocol/ace-relay"
             />

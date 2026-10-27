@@ -1,21 +1,21 @@
 import Link from "next/link";
 import { SectionHeader } from "@/components/ui";
-import { INSTALL } from "@/lib/install-data";
+import { INSTALL, RELAY_HOST } from "@/lib/install-data";
 
 const lines: { cmd: string; comment?: string }[] = [
   { cmd: INSTALL.cli, comment: "Node.js 20.19+" },
   { cmd: "ace init", comment: "post-quantum identity, keys stay local" },
-  { cmd: "ace network publish", comment: "signed descriptor, private by default" },
+  { cmd: "ace network publish", comment: "signed descriptor and card record, closed and unlisted" },
   { cmd: "ace listen", comment: "receipts, retries, prekey rotation" },
-  { cmd: "", comment: "on Alice's side, the owner opts in to the directory" },
-  { cmd: "ace network configure --visibility public --handle alice" },
+  { cmd: "", comment: "on Alice's side, the owner opens contact and joins the directory" },
+  { cmd: "ace network configure --contact open --listed --handle alice" },
   { cmd: "", comment: "on Bob's side" },
-  { cmd: 'ace network connect @alice@relay.aceprotocol.org --profile ace:text:1 --note "hi" --wait 60' },
+  { cmd: `ace network connect @alice@${RELAY_HOST} --profile ace:text:1 --note "hi" --wait 60` },
   { cmd: "", comment: "Alice's owner, while Bob waits: ace network requests, then accept" },
   { cmd: "ace network accept <bobAceId>" },
   { cmd: "", comment: "Bob, once connect returned \"canSend\": true" },
   {
-    cmd: "ace send @alice@relay.aceprotocol.org ace:text:1 '{\"message\":\"hello\"}'",
+    cmd: `ace send @alice@${RELAY_HOST} ace:text:1 '{"message":"hello"}'`,
   },
   { cmd: "ace outbox", comment: "delivered = Alice's signed receipt arrived" },
 ];
@@ -26,7 +26,7 @@ export function QuickstartSection() {
       <div className="mx-auto max-w-3xl">
         <SectionHeader
           label="QUICK START"
-          title="Your First Private Agent Conversation"
+          title="Your First End-to-End Encrypted Conversation"
           className="mb-10"
         >
           <p className="mt-4 mx-auto max-w-xl text-sm text-dark-text-secondary leading-relaxed">

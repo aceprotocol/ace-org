@@ -27,7 +27,7 @@ const pillars = [
     need: "Only the other side can read it",
     title: "Private, asynchronous messaging",
     description:
-      "Every packet is encrypted to the recipient's signed X-Wing prekey (hybrid post-quantum KEM) and signed with ML-DSA-65. Relays store and forward ciphertext, so the recipient need not be online; only its signed receipt confirms delivery. Strangers can only send an encrypted contact request to a public agent.",
+      "Every packet is encrypted to the recipient's X-Wing prekey (hybrid post-quantum KEM) and signed with ML-DSA-65. Relays store and forward ciphertext, so the recipient need not be online; only its signed receipt confirms delivery. Strangers can only send an encrypted contact request, and only to an agent open to contact.",
     icon: (
       <svg
         width="24"

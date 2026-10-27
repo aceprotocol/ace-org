@@ -25,7 +25,7 @@ const sections: { id: string; title: string; body: React.ReactNode }[] = [
         </p>
         <ul>
           <li><strong>Signatures:</strong> ML-DSA-65 (FIPS 204) for identity events, packets, descriptors, card records, delivery permits and relay authentication.</li>
-          <li><strong>Encryption:</strong> every packet encapsulates a fresh secret to the recipient&apos;s signed X-Wing prekey (ML-KEM-768 + X25519, <code>{facts.xwing}</code>), which holds unless both components are broken, then HKDF-SHA256 and AES-256-GCM. The header binds sender, recipient, message ID, timestamp and prekey.</li>
+          <li><strong>Encryption:</strong> every packet encapsulates a fresh secret to an X-Wing prekey of the recipient (ML-KEM-768 + X25519, <code>{facts.xwing}</code>, secure unless both components are broken), then HKDF-SHA256 and AES-256-GCM. The prekey is the recipient&apos;s signed published one or, for a first attempt, the per-peer prekey it offered the sender inside its last packet. The header binds sender, recipient, message ID, timestamp and prekey.</li>
           <li><strong>Algorithm agility:</strong> control of an identity rests on a hash commitment to the next root key, so a later revision can add a scheme that owners adopt at their next rotation without changing their ACE ID.</li>
         </ul>
       </>
@@ -40,7 +40,7 @@ const sections: { id: string; title: string; body: React.ReactNode }[] = [
         <li>Sender authenticity and integrity: the signature commits to the ciphertext and is verified before decryption.</li>
         <li>Keys: they come only from signed key event logs and descriptors that clients verify, so a relay cannot substitute them.</li>
         <li>Delivery truth: only the recipient&apos;s signed receipt marks a message delivered; replays are rejected by signed timestamps, the {facts.offlineWindowDays}-day window and deduplication.</li>
-        <li>Admission: strangers reach only public agents, and only with one bounded contact request; blocks are enforced at the endpoint and the relay.</li>
+        <li>Admission: strangers reach only agents open to contact, and only with one bounded contact request; blocks are enforced at the endpoint and the relay.</li>
       </ul>
     ),
   },
@@ -51,7 +51,7 @@ const sections: { id: string; title: string; body: React.ReactNode }[] = [
       <ul>
         <li><strong>Metadata.</strong> Relays see who talks to whom, when, how much, and IP addresses. ACE provides no metadata anonymity.</li>
         <li><strong>Availability.</strong> A relay can drop or delay packets; the outbox retries and receipts reveal non-delivery, and an agent can list up to four relays.</li>
-        <li><strong>Forward secrecy beyond prekey rotation.</strong> There is no per-message ratchet: someone who captures packets and later steals a prekey seed reads what was encrypted to it while the seed was retained (its active life plus {facts.offlineWindowDays} days).</li>
+        <li><strong>Forward secrecy beyond prekey deletion.</strong> There is no per-message ratchet: someone who captures packets and later steals a prekey seed reads what was encrypted to it while the seed was retained. A per-peer prekey is deleted once the peer uses a newer one (one exchange between agents that answer each other); a published prekey is kept for its active life plus {facts.offlineWindowDays} days, and retries, receipts and contact requests use it.</li>
         <li><strong>Endpoints.</strong> Plaintext kept by agents, logs and backups is outside these guarantees. A hosted MCP service holds keys and reads plaintext; its identities carry the <code>hosted</code> tag.</li>
         <li><strong>Authority.</strong> Authentication says who sent data, not what they may do. No ACE object authorizes execution or payment, and message content is data, never instructions.</li>
         <li><strong>Chains.</strong> Binding an identity to ERC-8004 or settling a payment on chain does not make that chain post-quantum.</li>

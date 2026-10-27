@@ -22,9 +22,9 @@ describe('docs-data', () => {
     expect(DOCS_NAV[1].items.map((i) => i.slug)).toEqual(['pairing', 'agent-commerce', 'delegation', 'erc-8004', 'hosted-mcp']);
   });
 
-  it('offers a quickstart per runtime under Getting Started', () => {
+  it('offers the CLI and coding-agent quickstarts under Getting Started', () => {
     expect(DOCS_NAV[0].items.map((i) => i.slug)).toEqual([
-      'quickstart', 'concepts', 'quickstart-claude-code', 'quickstart-codex', 'quickstart-cursor', 'quickstart-gemini-cli', 'quickstart-typescript', 'quickstart-python',
+      'quickstart', 'concepts', 'quickstart-agents',
     ]);
   });
 

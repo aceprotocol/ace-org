@@ -33,8 +33,7 @@ export function docDescription(slug: string): string {
     if (fenced || fences > 0) { if (fences % 2 === 1) fenced = !fenced; continue; }
     const text = block.trim();
     if (/^(#|\||-|\*|>|\d+\.|<)/.test(text) || text === '') continue;
-    // Skip the shared release banner of the SDK pages and lead-ins to a list.
-    if (text.startsWith('Version 1 is released') || text.endsWith(':')) continue;
+    if (text.endsWith(':')) continue; // a lead-in to a list
     return clip(plainText(text));
   }
   return 'ACE Protocol documentation.';

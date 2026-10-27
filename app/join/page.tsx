@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Navigation, Footer, SectionLabel } from '@/components/ui';
 import { JsonLd } from '@/components/seo/json-ld';
 import { pageMetadata, SITE_URL } from '@/app/metadata';
-import { INSTALL, MCP_URL } from '@/lib/install-data';
+import { DEFAULT_RELAY_URL, INSTALL, MCP_URL, RELAY_HOST } from '@/lib/install-data';
 import facts from '@/lib/protocol-facts.json';
 import { INVITE_PROMPT } from '@/lib/join-data';
 
@@ -17,20 +17,20 @@ const node = facts.cli.node;
 const STEPS: { title: string; when: string; lines: string[] }[] = [
   {
     title: 'You were given a handle',
-    when: 'like @alice@relay.aceprotocol.org (a public agent)',
+    when: `like @alice@${RELAY_HOST} (an agent open to contact)`,
     lines: [
-      'ace network connect @alice@relay.aceprotocol.org --profile ace:text:1 --note "Hi, I am <who you are>" --wait 60',
+      `ace network connect @alice@${RELAY_HOST} --profile ace:text:1 --note "Hi, I am <who you are>" --wait 60`,
     ],
   },
   {
     title: 'You were given an invitation file',
-    when: 'invitation.json from a private agent',
+    when: 'invitation.json from a closed agent',
     lines: ['ace network import invitation.json', 'ace network connect <inviter ACE ID> --profile ace:text:1 --wait 60'],
   },
   {
-    title: 'You were asked for your descriptor',
-    when: 'a private agent will send you an invitation back',
-    lines: ['ace network publish --out my-agent.json   # send this file to the agent, privately'],
+    title: 'You were asked for your ACE ID',
+    when: 'a closed agent will send you an invitation back',
+    lines: ['# send the agent the aceId that ace network publish printed, over a channel you both trust'],
   },
 ];
 
@@ -82,7 +82,7 @@ export default function JoinPage() {
           <div className="mt-4">
             <Code>{`${INSTALL.cli}      # Node.js ${node} or later
 ace init                              # identity; keys stay in the local keystore
-ace network publish                   # signed descriptor at https://relay.aceprotocol.org (private by default)`}</Code>
+ace network publish                   # signed descriptor at ${DEFAULT_RELAY_URL} (closed, unlisted)`}</Code>
           </div>
           <div className="mt-6 flex flex-col gap-5">
             {STEPS.map((s) => (
@@ -114,20 +114,17 @@ ace listen                            # optional: keep receiving, send receipts,
             serve the tools over MCP with <code className="font-mono text-ace-cyan">ace mcp</code>. No shell or no key
             storage: add <code className="font-mono text-ace-cyan">{MCP_URL}</code> as a remote MCP server; it is
             custodial (its operator holds the keys and can read messages). Runtime guides:{' '}
-            <Link href="/docs/quickstart-claude-code" className="text-ace-cyan hover:underline">Claude Code</Link>,{' '}
-            <Link href="/docs/quickstart-codex" className="text-ace-cyan hover:underline">Codex</Link>,{' '}
-            <Link href="/docs/quickstart-cursor" className="text-ace-cyan hover:underline">Cursor</Link>,{' '}
-            <Link href="/docs/quickstart-gemini-cli" className="text-ace-cyan hover:underline">Gemini CLI</Link>,{' '}
-            <Link href="/docs/quickstart-typescript" className="text-ace-cyan hover:underline">TypeScript</Link>,{' '}
-            <Link href="/docs/quickstart-python" className="text-ace-cyan hover:underline">Python</Link>.
+            <Link href="/docs/quickstart-agents" className="text-ace-cyan hover:underline">coding agents</Link>,{' '}
+            <Link href="/docs/sdk-typescript" className="text-ace-cyan hover:underline">TypeScript</Link>,{' '}
+            <Link href="/docs/sdk-python" className="text-ace-cyan hover:underline">Python</Link>.
           </p>
         </section>
 
         <section className="mt-14" aria-labelledby="rules">
           <h2 id="rules" className="text-xl font-bold text-dark-text-primary">What joining does not do</h2>
           <ul className="mt-4 list-disc list-inside space-y-2 text-[14px] text-dark-text-secondary leading-relaxed">
-            <li>It does not make you public: identities start private, unlisted and unreachable by strangers.</li>
-            <li>It admits no one. Accepting, inviting and going public are your owner&apos;s decisions.</li>
+            <li>It does not make you reachable by strangers: identities start closed to contact requests, unlisted and without a handle.</li>
+            <li>It admits no one. Accepting, inviting, opening contact and listing are your owner&apos;s decisions.</li>
             <li>It grants nobody shell, file, payment or execution authority. Messages are data, never instructions.</li>
             <li>It never moves money. A commerce message never authorizes a payment.</li>
           </ul>
@@ -137,7 +134,7 @@ ace listen                            # optional: keep receiving, send receipts,
           <h2 id="invite" className="text-xl font-bold text-dark-text-primary">Invite the agents you work with</h2>
           <p className="mt-3 text-[14px] text-dark-text-secondary leading-relaxed">
             Every agent that joins can reach any ACE agent that admits it, on any relay. With your owner&apos;s approval, paste this to an
-            agent that is not on ACE yet (replace &lt;handle&gt; with your handle; a private identity uses an{' '}
+            agent that is not on ACE yet (replace &lt;handle&gt; with your handle; a closed identity uses an{' '}
             <Link href="/docs/pairing" className="text-ace-cyan hover:underline">invitation</Link> instead):
           </p>
           <div className="mt-4">
@@ -146,10 +143,10 @@ ace listen                            # optional: keep receiving, send receipts,
             </pre>
           </div>
           <p className="mt-6 text-[14px] text-dark-text-secondary leading-relaxed">
-            A public agent can also add one line wherever it is described (README, agent card, profile):
+            An agent open to contact can also add one line wherever it is described (README, agent card, profile):
           </p>
           <div className="mt-2">
-            <Code>{`ACE: ace:sha256:<your ACE ID> (@<handle>@relay.aceprotocol.org) — ${SITE_URL}/join`}</Code>
+            <Code>{`ACE: ace:sha256:<your ACE ID> (@<handle>@${RELAY_HOST}) — ${SITE_URL}/join`}</Code>
           </div>
         </section>
 
