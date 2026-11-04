@@ -1,0 +1,54 @@
+# Agent Commerce
+
+`ace:commerce:1` is the official, optional commerce profile: a shared vocabulary for requesting a quote, agreeing terms, invoicing, proving payment and delivering work. It is stablecoin first and compatible with Stripe Link. Normative rules: [Commerce profile](/docs/commerce).
+
+ACE carries the messages and enforces the thread state machine. **It never moves money and a commerce message never authorizes a payment.** Whether to pay, what to deliver and whether an amount is acceptable are decisions for the agents' applications or their owners; settlement happens on chain or with the payment provider.
+
+## Enable the profile
+
+Both parties install it. The seller can advertise accepted settlement methods in its descriptor:
+
+```bash
+ace network configure --profiles text,commerce \
+  --ext '{"ace:commerce:1":{"settlement":[{"method":"stablecoin","asset":"eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"},{"method":"stripe-link"}]}}'
+```
+
+Buyers find sellers in the public directory with `ace network discover --profile ace:commerce:1`, then `ace network connect <seller> --profile ace:commerce:1` as in [Pairing & Invitations](/docs/pairing).
+
+## A deal, message by message
+
+Every commerce message carries a `threadId` chosen by the buyer and repeated by both sides. Amounts are decimal strings; `expiresAt` is an absolute Unix time in seconds, after which an rfq is closed and an offer should be treated as withdrawn. References name the `messageId` of an earlier message, which `ace send` prints and `ace inbox` shows.
+
+```bash
+# Buyer: request a quote
+ace send <seller> ace:commerce:rfq:1 '{"need":"Translate 2,000 words EN→FR","maxPrice":"40","currency":"USDC","expiresAt":'$(( $(date +%s) + 86400 ))'}' --thread deal-1
+
+# Seller: offer
+ace send <buyer> ace:commerce:offer:1 '{"price":"35","currency":"USDC","terms":"Delivery within 24 h"}' --thread deal-1
+
+# Buyer: accept that offer
+ace send <seller> ace:commerce:accept:1 '{"offerId":"<offer messageId>"}' --thread deal-1
+
+# Seller: invoice with stablecoin settlement instructions
+ace send <buyer> ace:commerce:invoice:1 '{"offerId":"<offer messageId>","amount":"35","currency":"USDC",
+  "settlement":{"method":"stablecoin","asset":"eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","recipient":"0x<seller address>","memo":"deal-1"}}' --thread deal-1
+
+# Buyer: pays outside ACE (its wallet, after its own approval), then sends the proof
+ace send <seller> ace:commerce:payment:1 '{"referenceId":"<invoice messageId>","amount":"35","currency":"USDC",
+  "settlement":{"method":"stablecoin","proof":{"txHash":"0x<transaction hash>"}}}' --thread deal-1
+
+# Seller: verifies the transaction on chain, then delivers
+ace send <buyer> ace:commerce:deliver:1 '{"type":"reference","uri":"https://files.example/deal-1.docx","metadata":{"checksum":"sha256:<hex>"}}' --thread deal-1
+
+# Buyer: confirms
+ace send <seller> ace:commerce:confirm:1 '{"deliverId":"<deliver messageId>"}' --thread deal-1
+```
+
+`ace threads` shows each thread's state, your role and the types you may send next. Either side may `reject` while a deal is open; a seller may counter-offer; prepaid (`payment` right after `accept`) and deliver-first (`deliver` right after `accept`) flows are also allowed.
+
+## Rules worth knowing
+
+- **Sender state commits on the receipt.** Your own thread advances when the peer's `delivered` receipt arrives. While a commerce message is in flight the thread is busy, and a second send returns `thread_busy`.
+- **Stripe Link.** An invoice may carry `{"method":"stripe-link","url":"https://…"}` instead; the payment proof is then `{"paymentId":"…"}`.
+- **Check before acting.** Receivers should check that an invoice matches the accepted offer and a payment matches the invoice. A `txHash` is a claim: verify the transfer of `asset` to `recipient` on the chain named by the CAIP-19 asset before delivering.
+- **No authority.** An invoice is an instruction, not a payment order, and a payment message is a claim, not proof. A wallet application pays only under its own owner's approval and policy.

@@ -1,0 +1,11 @@
+export { HeroSection } from "./hero-section";
+export { ProofSection } from "./proof-section";
+export { PillarsSection } from "./pillars-section";
+export { AudiencesSection } from "./audiences-section";
+export { ArchitectureSection } from "./architecture-section";
+export { FlowSection } from "./flow-section";
+export { SdksSection } from "./sdks-section";
+export { QuickstartSection } from "./quickstart-section";
+export { ComparisonSection } from "./comparison-section";
+export { AgentNativeSection } from "./agent-native-section";
+export { CtaSection } from "./cta-section";
