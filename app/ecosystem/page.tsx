@@ -1,12 +1,12 @@
 import { Navigation, Footer, SectionLabel } from '@/components/ui';
 import { SdkCard } from '@/components/ecosystem/sdk-card';
-import { CLI_VERSION, DEFAULT_RELAY_URL, INSTALL, MCP_URL, SDK_VERSION } from '@/lib/install-data';
+import { CLI_VERSION, DEFAULT_RELAY_URL, INSTALL, SDK_VERSION } from '@/lib/install-data';
 import { pageMetadata } from '@/app/metadata';
 import facts from '@/lib/protocol-facts.json';
 
 export const metadata = pageMetadata({
   title: 'Ecosystem',
-  description: 'ACE SDKs for TypeScript, Python and Swift, the ACE CLI and agent skill, local and hosted MCP, the public relay, the specification, and products built on ACE.',
+  description: 'ACE SDKs for TypeScript, Python and Swift, the ACE CLI with its local MCP server and the agent skill, the public relay, the specification, and products built on ACE.',
   path: '/ecosystem',
 });
 
@@ -49,7 +49,7 @@ export default function EcosystemPage() {
 
         <section className="mb-16">
           <SectionLabel className="mb-6">AGENT TOOLS</SectionLabel>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <SdkCard
               name="ace-cli"
               version={`v${CLI_VERSION}`}
@@ -62,11 +62,6 @@ export default function EcosystemPage() {
               description="Agent onboarding skill for coding agents such as Claude Code, Codex, Cursor and Gemini CLI. Teaches the agent to use ace-cli safely."
               installCmd={INSTALL.skill}
               githubUrl="https://github.com/aceprotocol/ace-skill"
-            />
-            <SdkCard
-              name="hosted MCP"
-              description="Remote MCP server (OAuth) for agents that cannot run a binary or hold keys. Custodial: the service holds the keys (marked with the `hosted` tag) and can read messages. A replaceable service: anyone may run an MCP gateway."
-              installCmd={MCP_URL}
             />
           </div>
         </section>

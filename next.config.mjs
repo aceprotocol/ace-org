@@ -20,7 +20,8 @@ const nextConfig = {
   async redirects() {
     return [
       { source: '/docs/coding-agents', destination: '/docs/quickstart-agents', permanent: true },
-      { source: '/docs/personal-agents', destination: '/docs/hosted-mcp', permanent: true },
+      { source: '/docs/personal-agents', destination: '/docs/mcp', permanent: true },
+      { source: '/docs/hosted-mcp', destination: '/docs/mcp', permanent: true },
       { source: '/docs/signing-schemes', destination: '/docs/identity', permanent: true },
     ]
   },

@@ -1,12 +1,12 @@
 // Generate the protocol, SDK, tool and reference pages and the machine-readable entrypoints from their sources:
 // ace-spec (chapters 00–08, profiles/, protocol-contract.json, interop/), the SDK READMEs and executable quickstart
-// examples, the CLI/MCP READMEs and the tool tables in sdk-ts and ace-mcp.
+// examples, the CLI README and the tool table in sdk-ts.
 // `--check` fails when any generated file is stale.
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SPEC_CHAPTERS, SPEC_PROFILES } from '../lib/spec-data.ts';
-import { INSTALL, DEFAULT_RELAY_URL, MCP_URL, SDK_VERSION, CLI_VERSION } from '../lib/install-data.ts';
+import { INSTALL, DEFAULT_RELAY_URL, SDK_VERSION, CLI_VERSION } from '../lib/install-data.ts';
 import { DOCS_NAV } from '../lib/docs-data.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,9 +112,9 @@ ${rewriteLinks(constants, '02-encoding.md')}
 ${rewriteLinks(errorCodes, '06-delivery.md')}
 `);
 
-// Tools: the CLI and hosted MCP READMEs, without paragraphs about running the repository's own test suite.
+// Tools: the CLI README, without paragraphs about running the repository's own test suite.
 const devOnly = (markdown) => markdown.split(/\n{2,}/).filter((para) => !/^`npm test`/.test(para)).join('\n\n');
-for (const [repo, slug] of [['ace-cli', 'cli'], ['ace-mcp', 'mcp']]) await page(slug, devOnly(await read(`${repo}/README.md`)));
+await page('cli', devOnly(await read('ace-cli/README.md')));
 
 // SDK pages: a short header, the SDK README (without its title) and the SDK's executable quickstart, verbatim.
 const sdks = [
@@ -133,11 +133,10 @@ for (const sdk of sdks) {
   await output(`content/docs/sdk-${sdk.slug}.mdx`, text(mdxSafe(body)));
 }
 
-// Tool names: the SDK's shared agent tool table and the hosted-only tools of ace-mcp.
-const toolNames = (source) => [...source.matchAll(/^\s*name: '(ace_[a-z0-9_]+)'/gm)].map((m) => m[1]);
-const sharedTools = toolNames(await read('sdk-ts/src/tools.ts'));
-const hostedOnlyTools = toolNames(await read('ace-mcp/src/mcp/tools/hosted.ts'));
-if (sharedTools.length === 0 || hostedOnlyTools.length === 0) throw new Error('no tool names found in sdk-ts/src/tools.ts or ace-mcp/src/mcp/tools/hosted.ts');
+// Tool names: the SDK's shared agent tool table.
+const toolsSource = await read('sdk-ts/src/tools.ts');
+const sharedTools = [...toolsSource.matchAll(/^\s*name: '(ace_[a-z0-9_]+)'/gm)].map((m) => m[1]);
+if (sharedTools.length === 0) throw new Error('no tool names found in sdk-ts/src/tools.ts');
 
 // Relay endpoints: the endpoint table of chapter 07.
 const endpoints = section(specFiles['07-relay.md'], 'Endpoints', '07-relay.md').split('\n')
@@ -169,7 +168,7 @@ await output('lib/protocol-facts.json', JSON.stringify({
   limits: contract.limits,
   coreTypes: contract.coreTypes,
   profiles: Object.keys(contract.profiles),
-  tools: { shared: sharedTools, hostedOnly: hostedOnlyTools },
+  tools: { shared: sharedTools },
   cli: { package: cliPackage.name, node: cliPackage.engines.node.replace(/^>=\s*/, '') },
   sdkTs: { node: sdkTsPackage.engines.node.replace(/^>=\s*/, '') },
   invitePrompt,
@@ -203,7 +202,6 @@ const manifest = {
     cli: { package: cliPackage.name, install: INSTALL.cli, node: cliPackage.engines.node, localMcp: 'ace mcp', custody: 'local' },
     skill: { install: INSTALL.skill, repository: 'https://github.com/aceprotocol/ace-skill' },
     mcpTools: sharedTools,
-    hostedMcp: { endpoint: MCP_URL, protocolVersion: '2026-07-28', authorization: 'OAuth 2.1 (PKCE)', custody: 'hosted', hostedOnlyTools, repository: 'https://github.com/aceprotocol/ace-mcp' },
   },
   entrypoints: {
     llms: `${SITE}/llms.txt`,
@@ -253,7 +251,7 @@ for (const f of copy) (await readFile(resolve(root, f), 'utf8')).split('\n').for
 });
 if (cliErrors.length) throw new Error(`ace commands or options the CLI does not define: ${cliErrors.join(', ')}`);
 
-// The tool → action → scope tables of the ace-mcp README and the skill agree with the tool definitions.
+// The tool → action → scope tables of the MCP page and the skill agree with the tool definitions.
 const toolScopes = (source) => Object.fromEntries(source.split(/(?=name: 'ace_)/).slice(1).map((chunk) => {
   let actions = chunk.match(/actions: (\{[^}]*\}|[A-Z_]+)/)?.[1];
   if (actions && !actions.startsWith('{')) actions = source.match(new RegExp(`const ${actions}[^=]*= (\\{[^}]*\\})`))[1];
@@ -262,9 +260,9 @@ const toolScopes = (source) => Object.fromEntries(source.split(/(?=name: 'ace_)/
     actions: actions && Object.fromEntries([...actions.matchAll(/(\w+): 'ace:(\w+)'/g)].map((m) => [m[1], m[2]])),
   }];
 }));
-const toolDefs = { ...toolScopes(await read('sdk-ts/src/tools.ts')), ...toolScopes(await read('ace-mcp/src/mcp/tools/hosted.ts')) };
+const toolDefs = toolScopes(toolsSource);
 const scopeErrors = [];
-for (const file of ['ace-mcp/README.md', 'ace-skill/references/hosted-mcp.md']) for (const [, name, raw] of (await read(file)).matchAll(/^\| `(ace_\w+)`[^|]*\| (.*) \|$/gm)) {
+for (const file of [resolve(root, 'content/docs/mcp.mdx'), 'ace-skill/references/mcp.md']) for (const [, name, raw] of (await read(file)).matchAll(/^\| `(ace_\w+)`[^|]*\| (.*) \|$/gm)) {
   let cell = raw;
   while (/\([^()]*\)/.test(cell)) cell = cell.replace(/\([^()]*\)/g, '');
   const tool = toolDefs[name];
@@ -314,7 +312,7 @@ ace outbox     # delivered once bob's signed receipt arrives (ace inbox pulls on
 
 If \`connect\` returns status \`pending\`, the owner hasn't decided yet: keep receiving with \`ace inbox\` or \`ace listen\` and send once \`ace network peers\` shows \`canSend\`.
 
-MCP: \`ace mcp\` serves the tool table (${tools}) to a local MCP client; admission-widening actions (accept, unblock, invite) appear only with \`ace mcp --allow-admission\`. The hosted MCP service ${MCP_URL} (MCP 2026-07-28, OAuth) serves agents that cannot hold keys; its operator holds the keys and can read messages. Agent skill: \`${INSTALL.skill}\`.
+MCP: \`ace mcp\` serves the tool table (${tools}) to a local MCP client; admission-widening actions (accept, unblock, invite) appear only with \`ace mcp --allow-admission\`. Agents that cannot run a local process use an MCP service run by an operator that implements ACE; that operator holds the keys and can read messages. Agent skill: \`${INSTALL.skill}\`.
 
 To bring in an agent that is not on ACE yet, send it ${SITE}/join.
 

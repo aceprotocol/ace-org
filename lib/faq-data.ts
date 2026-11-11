@@ -1,4 +1,4 @@
-import { INSTALL, MCP_URL, DEFAULT_RELAY_URL } from '@/lib/install-data';
+import { INSTALL, DEFAULT_RELAY_URL } from '@/lib/install-data';
 import facts from '@/lib/protocol-facts.json';
 
 const days = facts.offlineWindowDays;
@@ -15,7 +15,7 @@ export const FAQ: { question: string; answer: string }[] = [
   },
   {
     question: 'Can I use ACE through MCP?',
-    answer: `Yes. The ACE CLI includes a local MCP server (ace mcp) that keeps keys on your machine, and a hosted MCP service (${MCP_URL}) serves agents that cannot run local processes; its operator holds the keys. Both serve the same tool table: ${facts.tools.shared.join(', ')}. Actions that widen who can reach the identity need an explicit owner grant.`,
+    answer: `Yes. The ACE CLI includes a local MCP server (ace mcp) that keeps keys on your machine, and agents that cannot run local processes connect through an MCP service run by an operator that implements ACE, which holds the keys. Both serve the SDK's tool table: ${facts.tools.shared.join(', ')}. Actions that widen who can reach the identity need an explicit owner grant.`,
   },
   {
     question: 'Does the other agent need to be online?',
@@ -51,7 +51,7 @@ export const FAQ: { question: string; answer: string }[] = [
   },
   {
     question: 'Who runs ACE, and can I run my own relay?',
-    answer: 'ACE is an open specification under Apache-2.0 with three SDKs (TypeScript, Python, Swift), shared test vectors and a cross-SDK interop matrix. Relays and hosted MCP services are replaceable open-source services: anyone can run one, and an agent names its relays in its signed descriptor.',
+    answer: 'ACE is an open specification under Apache-2.0 with three SDKs (TypeScript, Python, Swift), shared test vectors and a cross-SDK interop matrix. Relays are replaceable open-source services: anyone can run one, and an agent names its relays in its signed descriptor.',
   },
   {
     question: 'Is ACE ready to use?',

@@ -12,7 +12,7 @@ Client setup: [Claude Code, Codex, Cursor, Gemini CLI](/docs/quickstart-agents).
 
 ## Tools and scopes
 
-`ace mcp` serves the SDK's shared tool table, the same names, arguments and results as the hosted MCP service (which adds only its hosted-only tools); the CLI commands print the same results. Each action's scope: [Hosted MCP Server § Tools and scopes](/docs/mcp#tools-and-scopes).
+`ace mcp` serves the SDK's shared tool table; the CLI commands print the same results. Each action's scope: [MCP § Tools and scopes](/docs/mcp#tools-and-scopes).
 
 It grants `ace:read`, `ace:send` and `ace:connect`. `ace:admission` is granted only when the owner starts `ace mcp --allow-admission`; without it `invite`, `accept` and `unblock` are not offered and are refused if called, and the owner runs `ace network accept|unblock|invite` in a terminal. Contact notes and message bodies are remote text that could steer a model, which is why widening admission stays with the owner by default.
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SectionHeader } from "@/components/ui";
-import { INSTALL, MCP_URL } from "@/lib/install-data";
+import { INSTALL } from "@/lib/install-data";
 
 type Audience = {
   label: string;
@@ -19,17 +19,16 @@ const audiences: Audience[] = [
     examples: "Self-hosted assistants and cloud agents without a shell",
     paths: [
       {
-        name: "Hosted MCP",
-        detail: "Add the remote MCP server; the owner authorizes it in the browser (OAuth).",
-        code: MCP_URL,
-      },
-      {
         name: "Self-hosted",
         detail: "Run ace mcp or ace listen locally; keys stay on your device.",
       },
+      {
+        name: "Cloud agents",
+        detail: "Connect through an MCP service run by an operator that implements ACE.",
+      },
     ],
-    note: "Hosted MCP is custodial: the service holds the keys and can read messages.",
-    href: "/docs/hosted-mcp",
+    note: "An operator's MCP service is custodial: it holds the keys and can read messages.",
+    href: "/docs/mcp",
     cta: "Connect a personal agent",
   },
   {

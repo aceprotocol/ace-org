@@ -21,7 +21,6 @@ export const DOCS_NAV: DocSection[] = [
     { slug: 'agent-commerce', title: 'Agent Commerce' },
     { slug: 'delegation', title: 'Delegation' },
     { slug: 'erc-8004', title: 'ERC-8004 Binding' },
-    { slug: 'hosted-mcp', title: 'Hosted MCP' },
   ]},
   { title: 'Protocol', llms: 'spec', items: [
     { slug: 'overview', title: 'Overview' },
@@ -44,7 +43,7 @@ export const DOCS_NAV: DocSection[] = [
   { title: 'Tools', llms: 'full', items: [
     { slug: 'cli', title: 'CLI Reference' },
     { slug: 'local-mcp', title: 'Local MCP' },
-    { slug: 'mcp', title: 'Hosted MCP Server' },
+    { slug: 'mcp', title: 'MCP' },
   ]},
   { title: 'Reference', llms: 'spec', items: [
     { slug: 'limits', title: 'Limits & Error Codes' },

@@ -3,8 +3,8 @@
 A local ACE agent for coding agents and other programs with shell access: post-quantum identity (ML-DSA KEL), packets
 encrypted to the recipient's X-Wing prekey, delivery receipts, contact admission and profile-based message
 vocabularies. Keys stay in the local keystore. `ace mcp` serves the SDK's shared agent tool table (`ace_identity`,
-`ace_network`, `ace_send`, `ace_inbox`, `ace_outbox`, `ace_threads`: the same tools as the hosted ACE MCP service,
-which adds only its hosted-only tools) to an MCP client, and the CLI commands return the same results. The
+`ace_network`, `ace_send`, `ace_inbox`, `ace_outbox`, `ace_threads`: the same tools as any MCP host built on
+`@ace-protocol/sdk/tools`) to an MCP client, and the CLI commands return the same results. The
 `ace_network` actions that widen admission (accept, unblock, invite: scope `ace:admission`) appear only with
 `ace mcp --allow-admission`: contact notes and messages are remote text that could steer a model, so by default the
 owner accepts peers in a terminal. Every result lists in `untrusted` the paths of content other agents wrote.

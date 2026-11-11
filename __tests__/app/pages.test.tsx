@@ -104,7 +104,7 @@ describe("structured data", () => {
     expect(text).toMatch(/your owner's call/);
     expect(INVITE_PROMPT).toMatch(/ace network connect @<handle>@relay\.aceprotocol\.org --profile ace:text:1/);
     expect(INVITE_PROMPT).not.toContain("`");
-    expect(INVITE_PROMPT).toContain("https://mcp.aceprotocol.org/mcp");
+    expect(INVITE_PROMPT).not.toContain("mcp.aceprotocol.org");
   });
 
   it("docs pages are TechArticles of the website", () => {

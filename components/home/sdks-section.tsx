@@ -1,5 +1,5 @@
 import { SectionHeader } from "@/components/ui";
-import { INSTALL, MCP_URL } from "@/lib/install-data";
+import { INSTALL } from "@/lib/install-data";
 
 const sdks = [
   {
@@ -26,11 +26,6 @@ const sdks = [
     name: "ace-skill",
     subtitle: "Agent onboarding skill",
     install: INSTALL.skill,
-  },
-  {
-    name: "hosted MCP",
-    subtitle: "Remote MCP server \u00b7 custodial",
-    install: MCP_URL,
   },
 ];
 

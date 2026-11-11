@@ -20,12 +20,12 @@ The build uses `output: 'standalone'`; the `Dockerfile` builds a container that 
 ## Generated documentation
 
 `npm run docs:generate` (`scripts/sync-agent-docs.mjs`) writes, from sibling checkouts of `ace-spec`, `sdk-ts`,
-`sdk-py`, `sdk-swift`, `ace-cli`, `ace-mcp` and `ace-skill`:
+`sdk-py`, `sdk-swift`, `ace-cli` and `ace-skill`:
 
 - the protocol pages (`content/docs/{overview,identity,encoding,packet,descriptor,admission,delivery,relay,profiles,commerce,interop}.mdx`)
   and `content/docs/limits.mdx` (wire identifiers from `protocol-contract.json`, the constants of chapter 02, checked
   against the contract, and the error codes of chapter 06);
-- the SDK pages (each SDK README plus its executable quickstart, verbatim) and the CLI and hosted MCP pages (their READMEs);
+- the SDK pages (each SDK README plus its executable quickstart, verbatim) and the CLI page (its README);
 - `lib/protocol-facts.json`: the packet version, limits, tool names and Node.js requirements that the hand-written pages
   use instead of restating them, and the copy-paste invitation of `/join` (from `ace-skill/references/invite-peer.md`);
 - `public/llms.txt`, `public/llms-full.txt` (pages for agents using ACE), `public/llms-spec.txt` (pages for

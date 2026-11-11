@@ -19,7 +19,7 @@ describe('docs-data', () => {
 
   it('places the Guides group right after Getting Started', () => {
     expect(DOCS_NAV[1].title).toBe('Guides');
-    expect(DOCS_NAV[1].items.map((i) => i.slug)).toEqual(['pairing', 'agent-commerce', 'delegation', 'erc-8004', 'hosted-mcp']);
+    expect(DOCS_NAV[1].items.map((i) => i.slug)).toEqual(['pairing', 'agent-commerce', 'delegation', 'erc-8004']);
   });
 
   it('offers the CLI and coding-agent quickstarts under Getting Started', () => {

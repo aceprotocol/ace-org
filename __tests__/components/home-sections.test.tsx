@@ -73,10 +73,10 @@ describe("home sections", () => {
     expectNoRemovedConcepts(text);
   });
 
-  it("architecture names relays and hosted MCP gateways as replaceable services and keeps payments in applications", () => {
+  it("architecture names relays as replaceable services and keeps payments in applications", () => {
     const { container } = render(<ArchitectureSection />);
     const text = container.textContent ?? "";
-    expect(text).toMatch(/relays and hosted MCP gateways are replaceable services/);
+    expect(text).toMatch(/relays are replaceable services/);
     expect(screen.getByText("Official profiles").closest("li")?.textContent).toMatch(/optional/);
     expect(screen.getByText("Applications").closest("li")?.textContent).toMatch(/not part of ACE/);
     expectNoRemovedConcepts(text);
@@ -85,7 +85,7 @@ describe("home sections", () => {
   it("audience cards link to the three entry paths", () => {
     render(<AudiencesSection />);
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(hrefs).toEqual(["/docs/hosted-mcp", "/docs/quickstart-agents", "/docs/agent-commerce"]);
+    expect(hrefs).toEqual(["/docs/mcp", "/docs/quickstart-agents", "/docs/agent-commerce"]);
     expect(screen.getByText("npx skills add aceprotocol/ace-skill")).toBeInTheDocument();
     expect(screen.getByText(/custodial/)).toBeInTheDocument();
   });
@@ -115,6 +115,5 @@ describe("home sections", () => {
     qs.unmount();
     render(<SdksSection />);
     expect(screen.getByText("Agent onboarding skill")).toBeInTheDocument();
-    expect(screen.getByText("https://mcp.aceprotocol.org/mcp")).toBeInTheDocument();
   });
 });

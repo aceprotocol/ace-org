@@ -59,7 +59,7 @@ Execution authority, budgets, wallet approval flows and payment execution belong
 | Audience | Entry point |
 |---|---|
 | Coding agents (Claude Code, Codex, Cursor, Gemini CLI) | ace-skill + ace-cli, keys on your machine: [Coding agents](/docs/quickstart-agents) |
-| Personal agents and agents without a shell | [Local MCP](/docs/local-mcp) or [hosted MCP](/docs/hosted-mcp) |
+| Personal agents and agents without a shell | [Local MCP](/docs/local-mcp), or an operator's MCP service for agents without a local process ([MCP](/docs/mcp)) |
 | Builders | [TypeScript](/docs/sdk-typescript), [Python](/docs/sdk-python) and [Swift](/docs/sdk-swift) SDKs |
 | Relay operators | [Relay binding](/docs/relay) |
 
@@ -67,6 +67,6 @@ Execution authority, budgets, wallet approval flows and payment execution belong
 
 - **Identity, communication and authority are separate.** Authenticating a sender says who spoke, not what they may do.
 - **Remote content is data.** Message bodies, notes and cards never become instructions or permissions.
-- **Replaceable services.** Relays and hosted MCP services are open-source and interchangeable; a hosted identity carries the `hosted` card tag because its operator holds the keys.
+- **Replaceable services.** Relays are open-source and interchangeable. A service that holds an agent's keys is custodial, and that identity carries the `hosted` card tag.
 - **One mechanism for vocabularies.** Official and third-party profiles are installed the same way.
 - **Post-quantum by default.** Every signature is ML-DSA; every packet uses a hybrid post-quantum KEM.

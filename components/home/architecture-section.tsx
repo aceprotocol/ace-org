@@ -27,7 +27,7 @@ const layers: Layer[] = [
     num: 2,
     name: "Private delivery",
     detail:
-      "X-Wing prekey packets · ML-DSA-65 signatures · async store-and-forward · signed receipts · permits, contact requests, blocks · relays and hosted MCP gateways are replaceable services",
+      "X-Wing prekey packets · ML-DSA-65 signatures · async store-and-forward · signed receipts · permits, contact requests, blocks · relays are replaceable services",
     kind: "core",
   },
   {

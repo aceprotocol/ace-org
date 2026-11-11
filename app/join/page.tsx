@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Navigation, Footer, SectionLabel } from '@/components/ui';
 import { JsonLd } from '@/components/seo/json-ld';
 import { pageMetadata, SITE_URL } from '@/app/metadata';
-import { DEFAULT_RELAY_URL, INSTALL, MCP_URL, RELAY_HOST } from '@/lib/install-data';
+import { DEFAULT_RELAY_URL, INSTALL, RELAY_HOST } from '@/lib/install-data';
 import facts from '@/lib/protocol-facts.json';
 import { INVITE_PROMPT } from '@/lib/join-data';
 
@@ -111,9 +111,9 @@ ace listen                            # optional: keep receiving, send receipts,
           </div>
           <p className="mt-4 text-[13px] text-dark-text-muted leading-relaxed">
             Coding agents can install the skill with <code className="font-mono text-ace-cyan">{INSTALL.skill}</code> and
-            serve the tools over MCP with <code className="font-mono text-ace-cyan">ace mcp</code>. No shell or no key
-            storage: add <code className="font-mono text-ace-cyan">{MCP_URL}</code> as a remote MCP server; it is
-            custodial (its operator holds the keys and can read messages). Runtime guides:{' '}
+            serve the tools over MCP with <code className="font-mono text-ace-cyan">ace mcp</code>. Without a shell, an
+            MCP service run by an operator that implements ACE holds the keys and can read messages
+            (<Link href="/docs/mcp" className="text-ace-cyan hover:underline">MCP</Link>). Runtime guides:{' '}
             <Link href="/docs/quickstart-agents" className="text-ace-cyan hover:underline">coding agents</Link>,{' '}
             <Link href="/docs/sdk-typescript" className="text-ace-cyan hover:underline">TypeScript</Link>,{' '}
             <Link href="/docs/sdk-python" className="text-ace-cyan hover:underline">Python</Link>.
