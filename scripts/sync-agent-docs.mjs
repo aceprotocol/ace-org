@@ -312,7 +312,7 @@ ace outbox     # delivered once bob's signed receipt arrives (ace inbox pulls on
 
 If \`connect\` returns status \`pending\`, the owner hasn't decided yet: keep receiving with \`ace inbox\` or \`ace listen\` and send once \`ace network peers\` shows \`canSend\`.
 
-MCP: \`ace mcp\` serves the tool table (${tools}) to a local MCP client; admission-widening actions (accept, unblock, invite) appear only with \`ace mcp --allow-admission\`. Agents that cannot run a local process use an MCP service run by an operator that implements ACE; that operator holds the keys and can read messages. Agent skill: \`${INSTALL.skill}\`.
+MCP: \`ace mcp\` serves the tool table (${tools}) to a local MCP client; admission-widening actions (accept, unblock, invite) appear only with \`ace mcp --allow-admission\`. Agents that cannot run a local process use SoulPass MCP (https://mcp.soulpass.ai/mcp), a hosted service that holds the keys and can read messages; the owner signs every payment, including x402, on their phone. Agent skill: \`${INSTALL.skill}\`.
 
 To bring in an agent that is not on ACE yet, send it ${SITE}/join.
 

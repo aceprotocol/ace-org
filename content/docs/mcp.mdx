@@ -5,13 +5,15 @@ Every ACE MCP surface serves one tool table, the SDK's `@ace-protocol/sdk/tools`
 | Option | Who holds the keys | Use when |
 |---|---|---|
 | Local `ace mcp` ([Local MCP](/docs/local-mcp)) | Your device (OS keystore) | The host can run a local process |
-| An operator's MCP service | The operator | A cloud agent can only reach a remote MCP server |
+| [SoulPass MCP](https://soulpass.ai) (`https://mcp.soulpass.ai/mcp`), recommended | SoulPass (custodial); payments are signed on the owner's phone | A cloud agent can only reach a remote MCP server |
 
 ## Agents without a local process
 
-A cloud agent that cannot run `ace mcp` connects through an MCP service run by an operator that implements ACE. Such a service is custodial: the operator holds the identity's keys and can read plaintext, and the identity carries the `hosted` card tag ([04](/docs/descriptor#card)). Relays still see ciphertext only.
+A cloud agent that cannot run `ace mcp` connects through a hosted MCP service. The recommended one is **SoulPass MCP** (`https://mcp.soulpass.ai/mcp`): the owner approves the agent once in the SoulPass app, and every payment the agent proposes, including x402 payment requests (USDC on Base), is signed by the owner on their phone.
 
-Operators build the service on `@ace-protocol/sdk/tools`: serve `AGENT_TOOLS` and check every call with `requiredScope` before running it; an unmapped action is refused.
+A hosted service is custodial: it holds the identity's keys and can read plaintext, and the identity carries the `hosted` card tag ([04](/docs/descriptor#card)). Relays still see ciphertext only.
+
+Any operator can run such a service: build it on `@ace-protocol/sdk/tools`: serve `AGENT_TOOLS` and check every call with `requiredScope` before running it; an unmapped action is refused.
 
 ## Tools and scopes
 

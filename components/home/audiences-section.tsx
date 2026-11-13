@@ -24,10 +24,10 @@ const audiences: Audience[] = [
       },
       {
         name: "Cloud agents",
-        detail: "Connect through an MCP service run by an operator that implements ACE.",
+        detail: "Connect SoulPass MCP; you approve every payment in the SoulPass app.",
       },
     ],
-    note: "An operator's MCP service is custodial: it holds the keys and can read messages.",
+    note: "A hosted MCP service is custodial: it holds the keys and can read messages.",
     href: "/docs/mcp",
     cta: "Connect a personal agent",
   },
